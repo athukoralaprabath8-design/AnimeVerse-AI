@@ -35,6 +35,7 @@ private val Panel = Color(0xFF211B32)
 private val Muted = Color(0xFFB9B1C9)
 private data class Hero(val name: String, val age: Int, val role: String, val bio: String)
 private data class Line(val speaker: String, val body: String, val mine: Boolean)
+private fun discoverFilterPlaceholder(hero: Hero, favorites: Set<String>) = true
 private val starters = listOf(
     Hero("Aiko", 21, "Star Guardian", "A bright guardian of the Moonlit Academy."),
     Hero("Ren", 24, "Quiet Mage", "A reserved spellcaster with a hidden past."),
@@ -103,6 +104,9 @@ private fun AnimeVerseApp() {
     var heroes by remember { mutableStateOf(readHeroes(prefs.getString("heroes", null))) }
     var lines by remember { mutableStateOf(readLines(prefs.getString("lines", null)).ifEmpty { listOf(Line("Narrator", "Moonlight spills across the academy courtyard. Your adventure begins here.", false)) }) }
     var selected by remember { mutableStateOf("Aiko") }
+    var showDiscover by remember { mutableStateOf(false) }
+    var discoverQuery by remember { mutableStateOf("") }
+    var favorites by remember { mutableStateOf(prefs.getStringSet("favorite_characters", emptySet())?.toSet() ?: emptySet()) }
     var draft by remember { mutableStateOf("") }
     var apiKey by remember { mutableStateOf("") }
     val localRuntime = remember { LocalAiRuntime(context) }
@@ -132,7 +136,7 @@ private fun AnimeVerseApp() {
     fun persist() {
         prefs.edit().putString("world", world).putString("heroes", writeHeroes(heroes))
             .putString("lines", writeLines(lines.takeLast(250))).putString("story_memory", storyMemory).putInt("chapter", chapter)
-            .putInt("bonds", bonds).putBoolean("mature", mature).apply()
+            .putInt("bonds", bonds).putBoolean("mature", mature).putStringSet("favorite_characters", favorites).apply()
     }
     fun addLine(who: String, text: String, mine: Boolean) {
         lines = (lines + Line(who, text, mine)).takeLast(250)
@@ -190,6 +194,54 @@ private fun AnimeVerseApp() {
                 TextButton(onClick = { memoryDraft = storyMemory; memoryOpen = true }) { Text("MEMORY") }
                 TextButton(onClick = { keyOpen = true }) { Text("AI KEY") }
             }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 7.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = !showDiscover, onClick = { showDiscover = false }, label = { Text("MY STORY") })
+                FilterChip(selected = showDiscover, onClick = { showDiscover = true }, label = { Text("DISCOVER CHARACTERS") })
+            }
+            if (showDiscover) {
+                val library = (starters + listOf(
+                    Hero("Yuna", 23, "Wandering Swordmaster", "Calm, observant and quietly competitive. She protects travelers but rarely speaks about her past."),
+                    Hero("Kaito", 25, "Skyship Captain", "A charming risk-taker with a strict personal code and a crew he considers family."),
+                    Hero("Hana", 21, "Cafe Musician", "Warm but independent, writes songs about people she meets."),
+                    Hero("Riku", 24, "Detective", "Methodical, skeptical and unexpectedly funny. He notices details others miss."),
+                    Hero("Sora", 22, "Arcane Researcher", "Curious, stubborn and brilliant, still learning when to ask for help.")
+                ) + heroes).distinctBy { it.name.lowercase() }
+                val filtered = library.filter { h ->
+                    (discoverQuery.isBlank() || listOf(h.name, h.role, h.bio).any { it.contains(discoverQuery, true) }) &&
+                    (discoverFilterPlaceholder(h, favorites))
+                }
+                Column(Modifier.fillMaxSize().padding(horizontal = 14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                    Text("CHARACTER DISCOVERY", color = Color(0xFFC8B7FF), fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("Find a new companion, rival, friend or story.", color = Muted, fontSize = 12.sp)
+                    OutlinedTextField(discoverQuery, { discoverQuery = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Search names, roles and personalities") }, singleLine = true)
+                    LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(9.dp), contentPadding = PaddingValues(bottom = 14.dp)) {
+                        items(filtered) { hero ->
+                            Column(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(15.dp)).padding(13.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(hero.name + " · " + hero.age, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                                        Text(hero.role, color = Violet, fontSize = 12.sp)
+                                    }
+                                    TextButton(onClick = { favorites = if (hero.name in favorites) favorites - hero.name else favorites + hero.name; persist() }) {
+                                        Text(if (hero.name in favorites) "♥ SAVED" else "♡ SAVE")
+                                    }
+                                }
+                                Text(hero.bio, color = Color.White, fontSize = 13.sp, lineHeight = 18.sp)
+                                Spacer(Modifier.height(8.dp))
+                                Button(onClick = {
+                                    if (heroes.none { it.name.equals(hero.name, true) }) heroes = heroes + hero
+                                    selected = hero.name
+                                    showDiscover = false
+                                    addLine("Narrator", hero.name + " joins your cast in " + world + ".", false)
+                                    persist()
+                                }, modifier = Modifier.fillMaxWidth()) {
+                                    Text(if (heroes.any { it.name.equals(hero.name, true) }) "OPEN IN MY STORY" else "ADD TO MY STORY")
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(world, { world = it; persist() }, modifier = Modifier.weight(1f), label = { Text("Story world") }, singleLine = true)
                 Spacer(Modifier.width(7.dp))
@@ -250,6 +302,7 @@ private fun AnimeVerseApp() {
                 Button(onClick = { val value = draft.trim(); if (value.isNotEmpty() && !aiBusy) { act(value); if (apiKey.isNotBlank()) draft = "" } }, enabled = !aiBusy) { Text("Send") }
             }
             Text("Local story save • online AI • free-model availability varies", color = Muted, fontSize = 9.sp, modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 5.dp))
+            }
         }
     }
 
