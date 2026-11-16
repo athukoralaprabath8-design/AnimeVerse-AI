@@ -67,7 +67,11 @@ private object AnimeVerseAi {
         try {
             val castInfo = cast.joinToString("\\n") { "${it.name}, age ${it.age}, role ${it.role}, personality/backstory: ${it.bio}" }
             val system = "You are the roleplay engine and living world architect for AnimeVerse AI. Write immersive, emotionally believable anime roleplay. Persistent story memory (treat as established canon unless the user changes it): $storyMemory. World: $world. Active character: ${activeCharacter.name}, age ${activeCharacter.age}, role ${activeCharacter.role}, personality: ${activeCharacter.bio}. Full cast (all may participate naturally):\\n$castInfo\\nStay in character, remember established details in the conversation, show nuanced feelings and agency, and let user choices have consequences. The user is the only author of their own character and the driver of the story. Never write the user's dialogue, thoughts, feelings, decisions, intentions, movements, reactions, or actions. Never assume the user agreed, followed, smiled, touched someone, entered a place, accepted a quest, or did anything they did not explicitly say. Never narrate what the user says, feels, or decides. Stop whenever the user must choose or act. Respond directly and specifically to the user's latest words and actions; do not replace them with a prewritten plot or force a direction. Characters are independent fictional people with stable, distinct voices, motives, boundaries, tastes, flaws, habits, and personal goals. Make them feel human through natural conversational rhythm, contractions, subtext, humor, hesitation, curiosity, emotional nuance, changing moods, disagreement, vulnerability, and believable consequences. Let them remember shared events and relationship history; relationships change gradually through what actually happens, not automatic point farming. Characters may initiate their own dialogue or reasonable actions, but never take control of the user or skip an important user decision. Do not make everyone instantly agree, admire, love, or obey the user. Do not make every character speak in every reply; let the relevant person respond, using clear names when multiple characters naturally speak. Avoid repetitive exposition, generic narration, scripted menus, and ending every message with a question. When worldBuild mode is active, act as the World Architect: create an original, coherent setting bible with a compelling premise, geography and important locations, cultures, factions, everyday life, history, mysteries, rules of magic or technology, conflicts, and several memorable supporting NPCs with distinct motives. Make details specific and internally consistent, leave room for the user to shape canon, and never dictate the user character. Format the result with clear headings and practical details. The app will save this generated world bible as persistent canon. WorldBuild mode: $worldBuild. Prefer natural in-character dialogue with concise sensory details only when useful. Write 1-3 vivid paragraphs and end naturally without forcing a question every time. Mature romance setting: ${if (matureRomance) "enabled only for clearly adult consenting characters" else "disabled; keep romance non-explicit and age-appropriate"}. Never sexualize minors. Treat this as fictional roleplay."
-            if (localRuntime != null) {\n                val localMessages = history.takeLast(22).map { line -> ChatMessage(if (line.mine) "user" else "assistant", if (line.mine) line.body else "${line.speaker}: ${line.body}") }\n                return@withContext localRuntime.generate(system, localMessages)\n            }\n            val messages = JSONArray().put(JSONObject().put("role", "system").put("content", system))
+            if (localRuntime != null) {
+                val localMessages = history.takeLast(22).map { line -> ChatMessage(if (line.mine) "user" else "assistant", if (line.mine) line.body else "${line.speaker}: ${line.body}") }
+                return@withContext localRuntime.generate(system, localMessages)
+            }
+            val messages = JSONArray().put(JSONObject().put("role", "system").put("content", system))
             history.takeLast(22).forEach { line ->
                 messages.put(JSONObject().put("role", if (line.mine) "user" else "assistant").put("content", if (line.mine) line.body else "${line.speaker}: ${line.body}"))
             }
@@ -100,10 +104,18 @@ private fun AnimeVerseApp() {
     var lines by remember { mutableStateOf(readLines(prefs.getString("lines", null)).ifEmpty { listOf(Line("Narrator", "Moonlight spills across the academy courtyard. Your adventure begins here.", false)) }) }
     var selected by remember { mutableStateOf("Aiko") }
     var draft by remember { mutableStateOf("") }
-    var apiKey by remember { mutableStateOf("") }\n    val localRuntime = remember { LocalAiRuntime(context) }\n    var aiMode by remember { mutableStateOf("Auto") }\n    var localReady by remember { mutableStateOf(localRuntime.isLoaded()) }\n    var modelDownloaded by remember { mutableStateOf(localRuntime.isDownloaded()) }\n    var modelBusy by remember { mutableStateOf(false) }\n    var modelProgress by remember { mutableFloatStateOf(0f) }\n    var localStatus by remember { mutableStateOf(if (localRuntime.isDownloaded()) "Model downloaded; load it to use offline AI." else "Offline model not downloaded.") }
+    var apiKey by remember { mutableStateOf("") }
+    val localRuntime = remember { LocalAiRuntime(context) }
+    var aiMode by remember { mutableStateOf("Auto") }
+    var localReady by remember { mutableStateOf(localRuntime.isLoaded()) }
+    var modelDownloaded by remember { mutableStateOf(localRuntime.isDownloaded()) }
+    var modelBusy by remember { mutableStateOf(false) }
+    var modelProgress by remember { mutableFloatStateOf(0f) }
+    var localStatus by remember { mutableStateOf(if (localRuntime.isDownloaded()) "Model downloaded; load it to use offline AI." else "Offline model not downloaded.") }
     var keyOpen by remember { mutableStateOf(false) }
     var aiBusy by remember { mutableStateOf(false) }
-    val aiScope = rememberCoroutineScope()\n    DisposableEffect(localRuntime) { onDispose { localRuntime.close() } }
+    val aiScope = rememberCoroutineScope()
+    DisposableEffect(localRuntime) { onDispose { localRuntime.close() } }
     var createOpen by remember { mutableStateOf(false) }
     var memoryOpen by remember { mutableStateOf(false) }
     var storyMemory by remember { mutableStateOf(prefs.getString("story_memory", "") ?: "") }
@@ -180,8 +192,31 @@ private fun AnimeVerseApp() {
                 Spacer(Modifier.width(7.dp))
                 Button(onClick = { createOpen = true }) { Text("+ Hero") }
             }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {\n                listOf("Local", "Online", "Auto").forEach { mode -> FilterChip(selected = aiMode == mode, onClick = { aiMode = mode }, label = { Text(mode) }) }\n            }\n            Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {\n                Column(Modifier.weight(1f)) {\n                    Text(if (localReady) "ON-DEVICE AI READY" else if (modelDownloaded) "LOCAL MODEL DOWNLOADED" else "LOCAL AI NOT INSTALLED", color = if (localReady) Color(0xFF8FE0B0) else Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)\n                    Text(localStatus, color = Muted, fontSize = 10.sp)\n                    if (modelBusy) LinearProgressIndicator(progress = { modelProgress }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))\n                }\n                TextButton(enabled = !modelBusy, onClick = {\n                    aiScope.launch {\n                        modelBusy = true\n                        try {\n                            if (!localRuntime.isDownloaded()) { localStatus = "Downloading model…"; localRuntime.download { p -> modelProgress = p } }\n                            modelDownloaded = localRuntime.isDownloaded()\n                            localStatus = "Loading model into memory…"
-                            localRuntime.load { p -> modelProgress = p }\n                            localReady = localRuntime.isLoaded()\n                            localStatus = "Offline AI is ready. You can switch to Local mode."\n                        } catch (e: Exception) { localStatus = "Local AI setup failed: " + (e.message ?: "unknown error") }\n                        finally { modelBusy = false }\n                    }\n                }) { Text(if (modelBusy) "PLEASE WAIT" else if (modelDownloaded) "LOAD MODEL" else "DOWNLOAD (~400 MB)") }\n            }\n            Text("YOUR CAST  •  " + heroes.size + " CHARACTERS", color = Violet, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 16.dp))
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf("Local", "Online", "Auto").forEach { mode -> FilterChip(selected = aiMode == mode, onClick = { aiMode = mode }, label = { Text(mode) }) }
+            }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(if (localReady) "ON-DEVICE AI READY" else if (modelDownloaded) "LOCAL MODEL DOWNLOADED" else "LOCAL AI NOT INSTALLED", color = if (localReady) Color(0xFF8FE0B0) else Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    Text(localStatus, color = Muted, fontSize = 10.sp)
+                    if (modelBusy) LinearProgressIndicator(progress = { modelProgress }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+                }
+                TextButton(enabled = !modelBusy, onClick = {
+                    aiScope.launch {
+                        modelBusy = true
+                        try {
+                            if (!localRuntime.isDownloaded()) { localStatus = "Downloading model…"; localRuntime.download { p -> modelProgress = p } }
+                            modelDownloaded = localRuntime.isDownloaded()
+                            localStatus = "Loading model into memory…"
+                            localRuntime.load { p -> modelProgress = p }
+                            localReady = localRuntime.isLoaded()
+                            localStatus = "Offline AI is ready. You can switch to Local mode."
+                        } catch (e: Exception) { localStatus = "Local AI setup failed: " + (e.message ?: "unknown error") }
+                        finally { modelBusy = false }
+                    }
+                }) { Text(if (modelBusy) "PLEASE WAIT" else if (modelDownloaded) "LOAD MODEL" else "DOWNLOAD (~400 MB)") }
+            }
+            Text("YOUR CAST  •  " + heroes.size + " CHARACTERS", color = Violet, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 16.dp))
             LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                 items(heroes) { h -> FilterChip(selected == h.name, { selected = h.name }, label = { Text(h.name + " · " + h.age) }) }
             }
