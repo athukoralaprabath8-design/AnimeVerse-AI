@@ -1,6 +1,8 @@
 package com.animeverse.ai
 
 import android.os.Bundle
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -9,6 +11,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -21,6 +24,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -36,6 +41,20 @@ private val Muted = Color(0xFFB9B1C9)
 private data class Hero(val name: String, val age: Int, val role: String, val bio: String)
 private data class Line(val speaker: String, val body: String, val mine: Boolean)
 private data class WorldPlace(val name: String, val region: String, val description: String)
+private data class WorldReply(val text: String, val location: String?, val people: List<Hero>)
+
+private fun parseWorldReply(raw: String): WorldReply {
+    val locationPattern = Regex("""\[\[WORLD_LOCATION:(.{1,80}?)\]\]""")
+    val peoplePattern = Regex("""\[\[WORLD_NPC:([^|]{1,40})\|(\d{1,3})\|([^|]{1,60})\|(.{1,240}?)\]\]""")
+    val location = locationPattern.find(raw)?.groupValues?.getOrNull(1)?.trim()?.takeIf { it.isNotBlank() }
+    val people = peoplePattern.findAll(raw).mapNotNull { match ->
+        val age = match.groupValues[2].toIntOrNull() ?: return@mapNotNull null
+        if (age !in 18..120) return@mapNotNull null
+        Hero(match.groupValues[1].trim(), age, match.groupValues[3].trim(), match.groupValues[4].trim())
+    }.filter { it.name.isNotBlank() }.distinctBy { it.name.lowercase() }.toList()
+    val cleaned = raw.replace(locationPattern, "").replace(peoplePattern, "").trim()
+    return WorldReply(cleaned.ifBlank { "The world stirs around you, but no clear response arrived. Try describing your action again." }, location, people)
+}
 private val worldPlaces = listOf(
     WorldPlace("Moonlit Academy", "Lunaris City", "A vast academy with dormitories, classrooms, gardens, a library and a busy central courtyard."),
     WorldPlace("Silverleaf Market", "Lunaris City", "A lively market of food stalls, small shops, street performers and merchants from distant regions."),
@@ -65,6 +84,43 @@ private val starters = listOf(
 
 
 private object AnimeVerseAi {
+    suspend fun generateAnimeImage(apiKey: String, description: String): Bitmap = withContext(Dispatchers.IO) {
+        val prompt = "high quality anime illustration, detailed expressive character design, cinematic lighting, polished anime background art, clearly adult characters, non-explicit, fully clothed, no nudity, " + description
+        val endpoint = URL("https://gen.pollinations.ai/image/" + android.net.Uri.encode(prompt) +
+            "?model=flux&width=1024&height=1024&private=true")
+        val connection = (endpoint.openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 30000
+            readTimeout = 120000
+            setRequestProperty("Authorization", "Bearer " + apiKey)
+            setRequestProperty("Accept", "image/*")
+        }
+        try {
+            val code = connection.responseCode
+            if (code !in 200..299) {
+                val detail = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                throw IllegalStateException("Image service error (" + code + "): " + detail.take(220).ifBlank { "Check your image API key and try again." })
+            }
+            val bytes = connection.inputStream.use { input ->
+                val output = java.io.ByteArrayOutputStream()
+                val buffer = ByteArray(8192)
+                var total = 0
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    total += count
+                    if (total > 20 * 1024 * 1024) throw IllegalStateException("Generated image is too large to load.")
+                    output.write(buffer, 0, count)
+                }
+                output.toByteArray()
+            }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                ?: throw IllegalStateException("The image service returned an unsupported image.")
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     suspend fun reply(
         apiKey: String,
         world: String,
@@ -74,21 +130,28 @@ private object AnimeVerseAi {
         matureRomance: Boolean,
         storyMemory: String,
         worldBuild: Boolean,
-        localRuntime: LocalAiRuntime? = null
+        livingWorld: Boolean = false,
+        localRuntime: LocalAiRuntime? = null,
+        onlineProvider: String = "OpenRouter"
     ): String = withContext(Dispatchers.IO) {
-        val connection = (URL("https://openrouter.ai/api/v1/chat/completions").openConnection() as HttpURLConnection).apply {
+        val useOpenAi = onlineProvider == "OpenAI"
+        val endpoint = if (useOpenAi) "https://api.openai.com/v1/responses" else "https://openrouter.ai/api/v1/chat/completions"
+        val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 25000
             readTimeout = 60000
             doOutput = true
             setRequestProperty("Authorization", "Bearer $apiKey")
             setRequestProperty("Content-Type", "application/json")
-            setRequestProperty("HTTP-Referer", "https://github.com/athukoralaprabath8-design/AnimeVerse-AI")
-            setRequestProperty("X-Title", "AnimeVerse AI")
+            if (!useOpenAi) {
+                setRequestProperty("HTTP-Referer", "https://github.com/athukoralaprabath8-design/AnimeVerse-AI")
+                setRequestProperty("X-Title", "AnimeVerse AI")
+            }
         }
         try {
             val castInfo = cast.joinToString("\\n") { "${it.name}, age ${it.age}, role ${it.role}, personality/backstory: ${it.bio}" }
-            val system = "You are the roleplay engine and living world architect for AnimeVerse AI. Write immersive, emotionally believable anime roleplay. Persistent story memory (treat as established canon unless the user changes it): $storyMemory. World: $world. Active character: ${activeCharacter.name}, age ${activeCharacter.age}, role ${activeCharacter.role}, personality: ${activeCharacter.bio}. Full cast (all may participate naturally):\\n$castInfo\\nStay in character, remember established details in the conversation, show nuanced feelings and agency, and let user choices have consequences. The user is the only author of their own character and the driver of the story. Never write the user's dialogue, thoughts, feelings, decisions, intentions, movements, reactions, or actions. Never assume the user agreed, followed, smiled, touched someone, entered a place, accepted a quest, or did anything they did not explicitly say. Never narrate what the user says, feels, or decides. Stop whenever the user must choose or act. Respond directly and specifically to the user's latest words and actions; do not replace them with a prewritten plot or force a direction. Characters are independent fictional people with stable, distinct voices, motives, boundaries, tastes, flaws, habits, and personal goals. Make them feel human through natural conversational rhythm, contractions, subtext, humor, hesitation, curiosity, emotional nuance, changing moods, disagreement, vulnerability, and believable consequences. Let them remember shared events and relationship history; relationships change gradually through what actually happens, not automatic point farming. Characters may initiate their own dialogue or reasonable actions, but never take control of the user or skip an important user decision. Do not make everyone instantly agree, admire, love, or obey the user. Do not make every character speak in every reply; let the relevant person respond, using clear names when multiple characters naturally speak. Avoid repetitive exposition, generic narration, scripted menus, and ending every message with a question. When worldBuild mode is active, act as the World Architect: create an original, coherent setting bible with a compelling premise, geography and important locations, cultures, factions, everyday life, history, mysteries, rules of magic or technology, conflicts, and several memorable supporting NPCs with distinct motives. Make details specific and internally consistent, leave room for the user to shape canon, and never dictate the user character. Format the result with clear headings and practical details. The app will save this generated world bible as persistent canon. WorldBuild mode: $worldBuild. Prefer natural in-character dialogue with concise sensory details only when useful. For normal roleplay, write 1-3 vivid paragraphs and end naturally without forcing a question every time. In worldBuild mode, use the requested world-bible headings and enough detail to make the setting usable. Mature romance setting: ${if (matureRomance) "enabled only for clearly adult consenting characters" else "disabled; keep romance non-explicit and age-appropriate"}. Never sexualize minors. Treat this as fictional roleplay."
+            val livingWorldInstructions = if (livingWorld) " ACTIVE MODE: FREE-ROAMING LIVING WORLD. Treat text in parentheses as the player's attempted action and resolve it naturally in the scene. This is an open-ended simulated world, not a menu or a fixed list of places/NPCs. Invent coherent locations, businesses, streets, homes, public venues and inhabitants when the player's action takes them somewhere new. Create believable adult NPCs with distinct names, ages (18+), jobs, personalities, motives and immediate circumstances; let them approach, work, talk to each other and respond naturally. If the player enters a venue, describe the actual atmosphere and who is present; let staff or visitors initiate plausible conversation without forcing intimacy or assuming consent. Remember new people, locations, promises, events and consequences as canon. Do not require the player to select a predefined character or location. At the very end append exactly one hidden state marker [[WORLD_LOCATION:Current location name]]. For every newly introduced recurring named NPC, append a marker [[WORLD_NPC:Name|Age|Role|Short personality and identifying details]]; age must be 18 or older. These markers are for app memory and will be removed before display. Do not include any other machine markers." else ""
+            val system = "You are the roleplay engine and living world architect for AnimeVerse AI. Write immersive, emotionally believable anime roleplay. Persistent story memory (treat as established canon unless the user changes it): $storyMemory. World: $world. Active character: ${activeCharacter.name}, age ${activeCharacter.age}, role ${activeCharacter.role}, personality: ${activeCharacter.bio}. Full cast (all may participate naturally):\\n$castInfo\\nStay in character, remember established details in the conversation, show nuanced feelings and agency, and let user choices have consequences. The user is the only author of their own character and the driver of the story. Never write the user's dialogue, thoughts, feelings, decisions, intentions, movements, reactions, or actions. Never assume the user agreed, followed, smiled, touched someone, entered a place, accepted a quest, or did anything they did not explicitly say. Never narrate what the user says, feels, or decides. Stop whenever the user must choose or act. Respond directly and specifically to the user's latest words and actions; do not replace them with a prewritten plot or force a direction. Characters are independent fictional people with stable, distinct voices, motives, boundaries, tastes, flaws, habits, and personal goals. Make them feel human through natural conversational rhythm, contractions, subtext, humor, hesitation, curiosity, emotional nuance, changing moods, disagreement, vulnerability, and believable consequences. Let them remember shared events and relationship history; relationships change gradually through what actually happens, not automatic point farming. Characters may initiate their own dialogue or reasonable actions, but never take control of the user or skip an important user decision. Do not make everyone instantly agree, admire, love, or obey the user. Do not make every character speak in every reply; let the relevant person respond, using clear names when multiple characters naturally speak. Avoid repetitive exposition, generic narration, scripted menus, and ending every message with a question. When worldBuild mode is active, act as the World Architect: create an original, coherent setting bible with a compelling premise, geography and important locations, cultures, factions, everyday life, history, mysteries, rules of magic or technology, conflicts, and several memorable supporting NPCs with distinct motives. Make details specific and internally consistent, leave room for the user to shape canon, and never dictate the user character. Format the result with clear headings and practical details. The app will save this generated world bible as persistent canon. WorldBuild mode: $worldBuild. Prefer natural in-character dialogue with concise sensory details only when useful. For normal roleplay, write 1-3 vivid paragraphs and end naturally without forcing a question every time. In worldBuild mode, use the requested world-bible headings and enough detail to make the setting usable. Mature romance setting: ${if (matureRomance) "enabled only for clearly adult consenting characters; allow attraction, sensual romantic tension, flirting, kissing and non-graphic intimacy, but do not generate explicit sexual descriptions or pornographic detail" else "disabled; keep romance non-explicit and age-appropriate"}. Never sexualize minors. Treat this as fictional roleplay. $livingWorldInstructions"
             if (localRuntime != null) {
                 val localMessages = history.takeLast(22).map { line -> ChatMessage(if (line.mine) "user" else "assistant", if (line.mine) line.body else "${line.speaker}: ${line.body}") }
                 return@withContext localRuntime.generate(system, localMessages)
@@ -97,14 +160,57 @@ private object AnimeVerseAi {
             history.takeLast(22).forEach { line ->
                 messages.put(JSONObject().put("role", if (line.mine) "user" else "assistant").put("content", if (line.mine) line.body else "${line.speaker}: ${line.body}"))
             }
-            val payload = JSONObject().put("model", "openrouter/free").put("messages", messages).put("temperature", 0.9).put("max_tokens", 450)
+            val payload = if (useOpenAi) {
+                JSONObject().put("model", "gpt-6-luna").put("input", messages).put("max_output_tokens", 600)
+            } else {
+                JSONObject().put("model", "openrouter/free").put("messages", messages)
+                    .put("provider", JSONObject().put("allow_fallbacks", true))
+                    .put("temperature", 0.85).put("max_tokens", 600)
+            }
             connection.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
             val code = connection.responseCode
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-            val raw = stream.bufferedReader().use { it.readText() }
-            if (code !in 200..299) throw IllegalStateException("Provider error $code: " + runCatching { JSONObject(raw).optJSONObject("error")?.optString("message") }.getOrNull().orEmpty().take(220))
-            val content = JSONObject(raw).getJSONArray("choices").getJSONObject(0).getJSONObject("message").optString("content").trim()
-            if (content.isBlank()) throw IllegalStateException("The AI returned an empty reply.")
+            val raw = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            val root = runCatching { JSONObject(raw) }.getOrElse {
+                throw IllegalStateException("The AI service sent an unreadable response (HTTP $code). Please try again.")
+            }
+            val providerError = root.optJSONObject("error")?.optString("message").orEmpty()
+            if (code !in 200..299 || providerError.isNotBlank()) {
+                throw IllegalStateException("AI service error ($code): " +
+                    providerError.ifBlank { "No free model is available right now." }.take(220))
+            }
+            val content = if (useOpenAi) {
+                val output = root.optJSONArray("output")
+                    ?: throw IllegalStateException("OpenAI returned no output. Check your API access and try again.")
+                (0 until output.length()).mapNotNull { index ->
+                    val item = output.optJSONObject(index) ?: return@mapNotNull null
+                    if (item.optString("type") != "message") return@mapNotNull null
+                    val parts = item.optJSONArray("content") ?: return@mapNotNull null
+                    (0 until parts.length()).mapNotNull { partIndex ->
+                        val part = parts.optJSONObject(partIndex) ?: return@mapNotNull null
+                        if (part.optString("type") == "output_text") part.optString("text").takeIf { it.isNotBlank() } else null
+                    }.joinToString("\n")
+                }.filter { it.isNotBlank() }.joinToString("\n").trim()
+            } else {
+                val choices = root.optJSONArray("choices")
+                    ?: throw IllegalStateException("The free AI provider returned no reply. Please try again.")
+                if (choices.length() == 0) throw IllegalStateException("The free AI provider returned an empty result. Please try again.")
+                val choice = choices.optJSONObject(0)
+                    ?: throw IllegalStateException("The AI response was incomplete. Please try again.")
+                val message = choice.optJSONObject("message")
+                    ?: throw IllegalStateException("The AI provider did not include a message. Please try again.")
+                val rawContent = message.opt("content")
+                when (rawContent) {
+                    is String -> rawContent.trim()
+                    is JSONArray -> (0 until rawContent.length()).mapNotNull { index ->
+                        rawContent.optJSONObject(index)?.optString("text")?.takeIf { it.isNotBlank() && it != "null" }
+                    }.joinToString("\n").trim()
+                    else -> ""
+                }
+            }
+            if (content.isBlank() || content.equals("null", ignoreCase = true)) {
+                throw IllegalStateException(if (useOpenAi) "OpenAI returned no text. Check the selected model and API access." else "The free AI provider returned no text. Free models can be busy; please try again.")
+            }
             content
         } finally { connection.disconnect() }
     }
@@ -126,16 +232,26 @@ private fun AnimeVerseApp() {
     var lines by remember { mutableStateOf(readLines(prefs.getString("lines", null)).ifEmpty { listOf(Line("Narrator", "Moonlight spills across the academy courtyard. Your adventure begins here.", false)) }) }
     var selected by remember { mutableStateOf("Aiko") }
     var showDiscover by remember { mutableStateOf(false) }
+    var showImages by remember { mutableStateOf(false) }
+    var imagePrompt by remember { mutableStateOf("") }
+    var imageApiKey by remember { mutableStateOf("") }
+    var imageKeyOpen by remember { mutableStateOf(false) }
+    var imageBusy by remember { mutableStateOf(false) }
+    var generatedImage by remember { mutableStateOf<Bitmap?>(null) }
+    var imageStatus by remember { mutableStateOf("Create original anime-style character art and world scenes.") }
     var showWorld by remember { mutableStateOf(false) }
     var playerName by remember { mutableStateOf(prefs.getString("player_name", "") ?: "") }
     var playerAge by remember { mutableStateOf(prefs.getString("player_age", "21") ?: "21") }
     var playerBackground by remember { mutableStateOf(prefs.getString("player_background", "") ?: "") }
     var currentLocation by remember { mutableStateOf(prefs.getString("current_location", "Moonlit Academy") ?: "Moonlit Academy") }
+    var worldDraft by remember { mutableStateOf("") }
     var discoveredPeople by remember { mutableStateOf(prefs.getStringSet("discovered_people", emptySet())?.toSet() ?: emptySet()) }
     var discoverQuery by remember { mutableStateOf("") }
     var favorites by remember { mutableStateOf(prefs.getStringSet("favorite_characters", emptySet())?.toSet() ?: emptySet()) }
     var draft by remember { mutableStateOf("") }
     var apiKey by remember { mutableStateOf("") }
+    var openAiApiKey by remember { mutableStateOf("") }
+    var onlineProvider by remember { mutableStateOf("OpenAI") }
     val localRuntime = remember { LocalAiRuntime(context) }
     var aiMode by remember { mutableStateOf("Auto") }
     var localReady by remember { mutableStateOf(localRuntime.isLoaded()) }
@@ -169,17 +285,38 @@ private fun AnimeVerseApp() {
         lines = (lines + Line(who, text, mine)).takeLast(250)
         persist()
     }
-    fun act(text: String, worldBuild: Boolean = false) {
+    fun recordAiAnswer(answer: String, worldBuild: Boolean, livingWorld: Boolean) {
+        if (livingWorld) {
+            val parsed = parseWorldReply(answer)
+            if (!parsed.location.isNullOrBlank()) currentLocation = parsed.location
+            if (parsed.people.isNotEmpty()) {
+                heroes = (heroes + parsed.people).distinctBy { it.name.lowercase() }
+                discoveredPeople = discoveredPeople + parsed.people.map { it.name }
+            }
+            addLine("LIVING WORLD", parsed.text, false)
+            storyMemory = (storyMemory + "\n\nWORLD EVENT at " + currentLocation + ": " + parsed.text).takeLast(12000)
+        } else {
+            addLine(if (worldBuild) "WORLD ARCHITECT" else (heroes.firstOrNull { it.name == selected }?.name ?: "Narrator"), answer, false)
+            if (worldBuild) storyMemory = (storyMemory + "\n\nWORLD BIBLE (AI-GENERATED CANON):\n" + answer).takeLast(12000)
+        }
+        bonds += 1
+        persist()
+    }
+
+    fun currentOnlineKey(): String = if (onlineProvider == "OpenAI") openAiApiKey else apiKey
+
+    fun act(text: String, worldBuild: Boolean = false, livingWorld: Boolean = false) {
         val useLocal = aiMode == "Local" || (aiMode == "Auto" && localRuntime.isLoaded())
         if (aiMode == "Local" && !localRuntime.isLoaded()) { localStatus = "Download and load the local model first."; return }
-        if (!useLocal && apiKey.isBlank()) { keyOpen = true; return }
+        if (!useLocal && currentOnlineKey().isBlank()) { keyOpen = true; return }
         val hero = heroes.firstOrNull { it.name == selected } ?: heroes.first()
         addLine("You", text, true)
         aiBusy = true
         aiScope.launch {
             try {
                 val answer = AnimeVerseAi.reply(
-                    apiKey = apiKey,
+                    apiKey = currentOnlineKey(),
+                    onlineProvider = onlineProvider,
                     world = world + ". Current location: " + currentLocation + ". Player character: " + (playerName.ifBlank { "unnamed player character" }) + ", age " + playerAge + ", background: " + playerBackground + ". The user alone controls this character.",
                     activeCharacter = hero,
                     cast = heroes,
@@ -187,25 +324,20 @@ private fun AnimeVerseApp() {
                     matureRomance = mature,
                     storyMemory = storyMemory,
                     worldBuild = worldBuild,
+                    livingWorld = livingWorld,
                     localRuntime = if (useLocal) localRuntime else null
                 )
-                addLine(if (worldBuild) "WORLD ARCHITECT" else hero.name, answer, false)
-                if (worldBuild) storyMemory = (storyMemory + "\\n\\nWORLD BIBLE (AI-GENERATED CANON):\\n" + answer).take(12000)
-                bonds += 1
-                persist()
+                recordAiAnswer(answer, worldBuild, livingWorld)
             } catch (e: Exception) {
-                if (useLocal && aiMode == "Auto" && apiKey.isNotBlank()) {
+                if (useLocal && aiMode == "Auto" && currentOnlineKey().isNotBlank()) {
                     try {
-                        val fallback = AnimeVerseAi.reply(apiKey = apiKey, world = world + ". Current location: " + currentLocation + ". Player character: " + (playerName.ifBlank { "unnamed player character" }) + ", age " + playerAge + ", background: " + playerBackground + ". The user alone controls this character.", activeCharacter = hero, cast = heroes, history = lines.takeLast(24), matureRomance = mature, storyMemory = storyMemory, worldBuild = worldBuild, localRuntime = null)
-                        addLine(if (worldBuild) "WORLD ARCHITECT" else hero.name, fallback, false)
-                        if (worldBuild) storyMemory = (storyMemory + "\\n\\nWORLD BIBLE (AI-GENERATED CANON):\\n" + fallback).take(12000)
-                        bonds += 1
-                        persist()
+                        val fallback = AnimeVerseAi.reply(apiKey = currentOnlineKey(), onlineProvider = onlineProvider, world = world + ". Current location: " + currentLocation + ". Player character: " + (playerName.ifBlank { "unnamed player character" }) + ", age " + playerAge + ", background: " + playerBackground + ". The user alone controls this character.", activeCharacter = hero, cast = heroes, history = lines.takeLast(24), matureRomance = mature, storyMemory = storyMemory, worldBuild = worldBuild, livingWorld = livingWorld, localRuntime = null)
+                        recordAiAnswer(fallback, worldBuild, livingWorld)
                     } catch (fallbackError: Exception) {
                         addLine("System", "Local AI failed (" + (e.message ?: "unknown error") + "); online fallback failed (" + (fallbackError.message ?: "unknown error") + ").", false)
                     }
                 } else {
-                    addLine("System", "AI connection failed: " + (e.message ?: "Please try again.") + " Check your internet and free-model API key.", false)
+                    addLine("System", "AI connection failed: " + (e.message ?: "Please try again.") + " Check your internet and selected provider API key.", false)
                 }
             } finally { aiBusy = false }
         }
@@ -222,12 +354,13 @@ private fun AnimeVerseApp() {
                 TextButton(onClick = { keyOpen = true }) { Text("AI KEY") }
             }
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 7.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                FilterChip(selected = !showWorld && !showDiscover, onClick = { showWorld = false; showDiscover = false }, label = { Text("MY STORY") })
-                FilterChip(selected = showWorld, onClick = { showWorld = true; showDiscover = false }, label = { Text("LIVING WORLD") })
-                FilterChip(selected = showDiscover, onClick = { showDiscover = true; showWorld = false }, label = { Text("CHARACTERS") })
+                FilterChip(selected = !showWorld && !showDiscover && !showImages, onClick = { showWorld = false; showDiscover = false; showImages = false }, label = { Text("MY STORY") })
+                FilterChip(selected = showWorld, onClick = { showWorld = true; showDiscover = false; showImages = false }, label = { Text("LIVING WORLD") })
+                FilterChip(selected = showDiscover, onClick = { showDiscover = true; showWorld = false; showImages = false }, label = { Text("CHARACTERS") })
+                FilterChip(selected = showImages, onClick = { showImages = true; showWorld = false; showDiscover = false }, label = { Text("ART") })
             }
             if (showWorld) {
-                val place = worldPlaces.firstOrNull { it.name == currentLocation } ?: worldPlaces.first()
+                val place = worldPlaces.firstOrNull { it.name == currentLocation } ?: WorldPlace(currentLocation, "Discovered location", "A place discovered through your actions in the living world.")
                 Column(Modifier.fillMaxSize().padding(horizontal = 14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                     Text("YOUR LIFE IN THE WORLD", color = Color(0xFFC8B7FF), fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
                     Text("Create your own identity. The world is yours to explore.", color = Muted, fontSize = 12.sp)
@@ -249,34 +382,53 @@ private fun AnimeVerseApp() {
                             }, label = { Text(destination.name, fontSize = 10.sp) })
                         }
                     }
-                    Text("PEOPLE YOU HAVE MET · " + discoveredPeople.size, color = Violet, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Text("WORLD SCENE & RECENT EVENTS", color = Violet, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp), contentPadding = PaddingValues(bottom = 6.dp)) {
+                        items(lines.takeLast(16)) { line ->
+                            Column(Modifier.fillMaxWidth(), horizontalAlignment = if (line.mine) Alignment.End else Alignment.Start) {
+                                Text(if (line.mine) "YOU" else line.speaker.uppercase(), color = Violet, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                Box(Modifier.fillMaxWidth(0.94f).background(if (line.mine) Color(0xFF49357A) else Panel, RoundedCornerShape(12.dp)).padding(10.dp)) {
+                                    Text(line.body, color = Color.White, fontSize = 13.sp, lineHeight = 18.sp)
+                                }
+                            }
+                        }
+                        item { Text("PEOPLE YOU HAVE MET · " + discoveredPeople.size, color = Violet, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
                         items(discoveredPeople.toList()) { personName ->
-                            val person = (heroes + roamingPeople).firstOrNull { it.name == personName }
+                            val person = heroes.firstOrNull { it.name.equals(personName, true) } ?: roamingPeople.firstOrNull { it.name.equals(personName, true) }
                             if (person != null) {
                                 Row(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(12.dp)).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(1f)) {
                                         Text(person.name + " · " + person.age, color = Color.White, fontWeight = FontWeight.Bold)
                                         Text(person.role, color = Violet, fontSize = 11.sp)
                                     }
-                                    TextButton(onClick = { if (heroes.none { it.name == person.name }) heroes = heroes + person; selected = person.name; showWorld = false; addLine("Narrator", person.name + " is ready to talk with you.", false); persist() }) { Text("TALK") }
+                                    TextButton(onClick = { if (heroes.none { it.name.equals(person.name, true) }) heroes = heroes + person; selected = person.name; showWorld = false; addLine("Narrator", person.name + " is ready to talk with you.", false); persist() }) { Text("TALK") }
                                 }
                             }
                         }
                     }
-                    Button(onClick = {
-                        val candidates = roamingPeople.filter { it.name !in discoveredPeople }
-                        if (candidates.isEmpty()) {
-                            addLine("World", "You have met all currently authored named residents. More inhabitants can be added as the world grows.", false)
-                        } else {
-                            val encounter = candidates.random()
-                            discoveredPeople = discoveredPeople + encounter.name
-                            if (heroes.none { it.name == encounter.name }) heroes = heroes + encounter
-                            selected = encounter.name
-                            persist()
-                            addLine("World", "While exploring " + currentLocation + ", you notice " + encounter.name + " (" + encounter.role + "). " + encounter.bio + " They are here in the world; you can decide whether to approach.", false)
-                        }
-                    }, modifier = Modifier.fillMaxWidth()) { Text("ROAM & DISCOVER SOMEONE") }
+                    OutlinedTextField(
+                        value = worldDraft,
+                        onValueChange = { worldDraft = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Describe what you do in the world") },
+                        placeholder = { Text("Example: (I enter the inn and look for someone to talk to.)") },
+                        minLines = 2,
+                        maxLines = 4
+                    )
+                    Button(
+                        onClick = {
+                            val action = worldDraft.trim()
+                            if (action.isNotEmpty() && !aiBusy) {
+                                val canSend = (aiMode == "Local" && localRuntime.isLoaded()) ||
+                                    (aiMode == "Online" && currentOnlineKey().isNotBlank()) ||
+                                    (aiMode == "Auto" && (localRuntime.isLoaded() || currentOnlineKey().isNotBlank()))
+                                act(action, livingWorld = true)
+                                if (canSend) worldDraft = ""
+                            }
+                        },
+                        enabled = !aiBusy && worldDraft.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text(if (aiBusy) "THE WORLD IS RESPONDING…" else "DO ACTION") }
                 }
             } else if (showDiscover) {
                 val library = (starters + listOf(
@@ -321,11 +473,66 @@ private fun AnimeVerseApp() {
                         }
                     }
                 }
+            } else if (showImages) {
+                Column(Modifier.fillMaxSize().padding(horizontal = 14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("ANIME ART STUDIO", color = Color(0xFFC8B7FF), fontSize = 19.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("Generate original portraits, outfits, dramatic moments and locations for your story.", color = Muted, fontSize = 12.sp)
+                    OutlinedTextField(
+                        value = imagePrompt,
+                        onValueChange = { imagePrompt = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Describe the image") },
+                        placeholder = { Text("A silver-haired adult mage in a moonlit academy garden...") },
+                        minLines = 3,
+                        maxLines = 5
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        OutlinedButton(onClick = { imagePrompt = "Original adult anime character portrait, elegant fantasy outfit, soft cinematic lighting, detailed eyes" }, modifier = Modifier.weight(1f)) { Text("CHARACTER", fontSize = 10.sp) }
+                        OutlinedButton(onClick = { imagePrompt = "Beautiful anime fantasy city at twilight, glowing lanterns, detailed architecture, cinematic atmosphere" }, modifier = Modifier.weight(1f)) { Text("LOCATION", fontSize = 10.sp) }
+                    }
+                    Button(
+                        onClick = {
+                            if (imageApiKey.isBlank()) imageKeyOpen = true
+                            else if (imagePrompt.isNotBlank() && !imageBusy) {
+                                imageBusy = true
+                                imageStatus = "Creating your anime artwork…"
+                                aiScope.launch {
+                                    try {
+                                        generatedImage = AnimeVerseAi.generateAnimeImage(imageApiKey, imagePrompt.trim())
+                                        imageStatus = "Artwork generated. Change the description to create another image."
+                                    } catch (e: Exception) {
+                                        imageStatus = e.message ?: "Image generation failed. Please try again."
+                                    } finally { imageBusy = false }
+                                }
+                            }
+                        },
+                        enabled = !imageBusy && imagePrompt.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text(if (imageBusy) "GENERATING ART…" else "GENERATE ANIME IMAGE") }
+                    Text(imageStatus, color = Muted, fontSize = 11.sp)
+                    generatedImage?.let { art ->
+                        Image(
+                            bitmap = art.asImageBitmap(),
+                            contentDescription = "Generated AnimeVerse AI artwork",
+                            modifier = Modifier.fillMaxWidth().weight(1f),
+                            contentScale = ContentScale.Fit
+                        )
+                    } ?: Spacer(Modifier.weight(1f))
+                    TextButton(onClick = { imageKeyOpen = true }) { Text(if (imageApiKey.isBlank()) "CONNECT IMAGE GENERATION" else "CHANGE IMAGE API KEY") }
+                    Text("Image generation uses a separate provider key. Usage limits and any provider charges depend on that provider.", color = Muted, fontSize = 9.sp)
+                }
             } else {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(world, { world = it; persist() }, modifier = Modifier.weight(1f), label = { Text("Story world") }, singleLine = true)
                 Spacer(Modifier.width(7.dp))
                 Button(onClick = { createOpen = true }) { Text("+ Hero") }
+            }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf("OpenAI GPT", "OpenRouter").forEach { provider ->
+                    FilterChip(selected = onlineProvider == (if (provider == "OpenAI GPT") "OpenAI" else "OpenRouter"),
+                        onClick = { onlineProvider = (if (provider == "OpenAI GPT") "OpenAI" else "OpenRouter"); keyOpen = false },
+                        label = { Text(provider) })
+                }
             }
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf("Local", "Online", "Auto").forEach { mode -> FilterChip(selected = aiMode == mode, onClick = { aiMode = mode }, label = { Text(mode) }) }
@@ -379,7 +586,7 @@ private fun AnimeVerseApp() {
                     textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 14.sp),
                     decorationBox = { inner -> if (draft.isEmpty()) Text("Write what happens next…", color = Muted); inner() })
                 Spacer(Modifier.width(7.dp))
-                Button(onClick = { val value = draft.trim(); if (value.isNotEmpty() && !aiBusy) { act(value); if (apiKey.isNotBlank()) draft = "" } }, enabled = !aiBusy) { Text("Send") }
+                Button(onClick = { val value = draft.trim(); if (value.isNotEmpty() && !aiBusy) { act(value); if (currentOnlineKey().isNotBlank() || aiMode == "Local") draft = "" } }, enabled = !aiBusy) { Text("Send") }
             }
             Text("Local story save • online AI • free-model availability varies", color = Muted, fontSize = 9.sp, modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 5.dp))
             }
@@ -388,16 +595,38 @@ private fun AnimeVerseApp() {
 
     if (keyOpen) AlertDialog(
         onDismissRequest = { keyOpen = false },
-        title = { Text("Connect free online AI") },
+        title = { Text(if (onlineProvider == "OpenAI") "Connect OpenAI GPT" else "Connect OpenRouter free AI") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Create a free OpenRouter account and an API key. Use free models only; do not add credits or enable paid usage. Free model availability and daily limits can change.", color = Muted)
-                OutlinedTextField(apiKey, { apiKey = it.trim() }, label = { Text("OpenRouter API key") }, singleLine = true)
-                Text("Your key is kept only in app memory for this session and is not saved to the story. Re-enter it after restarting the app.", color = Muted, fontSize = 11.sp)
+                if (onlineProvider == "OpenAI") {
+                    Text("Create an OpenAI API key at platform.openai.com/api-keys. The API is billed separately from a ChatGPT subscription; model access, usage limits and charges depend on your API account.", color = Muted)
+                    OutlinedTextField(openAiApiKey, { openAiApiKey = it.trim() }, label = { Text("OpenAI API key") }, singleLine = true)
+                } else {
+                    Text("Create an OpenRouter account and API key. The app requests free models only; availability and limits can change.", color = Muted)
+                    OutlinedTextField(apiKey, { apiKey = it.trim() }, label = { Text("OpenRouter API key") }, singleLine = true)
+                }
+                Text("For this personal test build, the key stays in app memory for this session and is not saved to the story. Re-enter it after restarting. A production release should use a secure backend; never publish an API key in the app or GitHub.", color = Muted, fontSize = 11.sp)
             }
         },
         confirmButton = { TextButton(onClick = { keyOpen = false }) { Text("Save for this session") } },
-        dismissButton = { TextButton(onClick = { apiKey = ""; keyOpen = false }) { Text("Clear key") } }
+        dismissButton = { TextButton(onClick = {
+            if (onlineProvider == "OpenAI") openAiApiKey = "" else apiKey = ""
+            keyOpen = false
+        }) { Text("Clear key") } }
+    )
+
+    if (imageKeyOpen) AlertDialog(
+        onDismissRequest = { imageKeyOpen = false },
+        title = { Text("Connect anime image generation") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("AnimeVerse AI uses Pollinations image generation. Create a restricted secret API key at enter.pollinations.ai with image-only access and a small usage budget, then paste it here. The key stays in app memory for this session and is not saved to your story.", color = Muted)
+                OutlinedTextField(imageApiKey, { imageApiKey = it.trim() }, label = { Text("Pollinations secret API key") }, singleLine = true)
+                Text("Never share your secret key or put it in public GitHub files. Provider limits and prices can change.", color = Muted, fontSize = 11.sp)
+            }
+        },
+        confirmButton = { TextButton(onClick = { imageKeyOpen = false }) { Text("Use this key") } },
+        dismissButton = { TextButton(onClick = { imageApiKey = ""; imageKeyOpen = false }) { Text("Clear key") } }
     )
 
     if (createOpen) AlertDialog(
