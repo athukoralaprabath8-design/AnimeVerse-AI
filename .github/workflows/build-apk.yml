@@ -2,7 +2,7 @@ name: Build AnimeVerse AI APK
 on:
   workflow_dispatch:
   push:
-    branches: [ "main", "offline-ai-engine-spike" ]
+    branches: [ "main", "offline-ai-engine-spike", "living-world-freeform" ]
 permissions:
   contents: read
 jobs:
