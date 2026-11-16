@@ -131,17 +131,22 @@ private object AnimeVerseAi {
         storyMemory: String,
         worldBuild: Boolean,
         livingWorld: Boolean = false,
-        localRuntime: LocalAiRuntime? = null
+        localRuntime: LocalAiRuntime? = null,
+        onlineProvider: String = "OpenRouter"
     ): String = withContext(Dispatchers.IO) {
-        val connection = (URL("https://openrouter.ai/api/v1/chat/completions").openConnection() as HttpURLConnection).apply {
+        val useOpenAi = onlineProvider == "OpenAI"
+        val endpoint = if (useOpenAi) "https://api.openai.com/v1/responses" else "https://openrouter.ai/api/v1/chat/completions"
+        val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 25000
             readTimeout = 60000
             doOutput = true
             setRequestProperty("Authorization", "Bearer $apiKey")
             setRequestProperty("Content-Type", "application/json")
-            setRequestProperty("HTTP-Referer", "https://github.com/athukoralaprabath8-design/AnimeVerse-AI")
-            setRequestProperty("X-Title", "AnimeVerse AI")
+            if (!useOpenAi) {
+                setRequestProperty("HTTP-Referer", "https://github.com/athukoralaprabath8-design/AnimeVerse-AI")
+                setRequestProperty("X-Title", "AnimeVerse AI")
+            }
         }
         try {
             val castInfo = cast.joinToString("\\n") { "${it.name}, age ${it.age}, role ${it.role}, personality/backstory: ${it.bio}" }
@@ -155,9 +160,13 @@ private object AnimeVerseAi {
             history.takeLast(22).forEach { line ->
                 messages.put(JSONObject().put("role", if (line.mine) "user" else "assistant").put("content", if (line.mine) line.body else "${line.speaker}: ${line.body}"))
             }
-            val payload = JSONObject().put("model", "openrouter/free").put("messages", messages)
-                .put("provider", JSONObject().put("allow_fallbacks", true))
-                .put("temperature", 0.85).put("max_tokens", 600)
+            val payload = if (useOpenAi) {
+                JSONObject().put("model", "gpt-6-luna").put("input", messages).put("max_output_tokens", 600)
+            } else {
+                JSONObject().put("model", "openrouter/free").put("messages", messages)
+                    .put("provider", JSONObject().put("allow_fallbacks", true))
+                    .put("temperature", 0.85).put("max_tokens", 600)
+            }
             connection.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
             val code = connection.responseCode
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
@@ -170,26 +179,37 @@ private object AnimeVerseAi {
                 throw IllegalStateException("AI service error ($code): " +
                     providerError.ifBlank { "No free model is available right now." }.take(220))
             }
-            val choices = root.optJSONArray("choices")
-                ?: throw IllegalStateException("The free AI provider returned no reply. Please try again.")
-            if (choices.length() == 0) throw IllegalStateException("The free AI provider returned an empty result. Please try again.")
-            val choice = choices.optJSONObject(0)
-                ?: throw IllegalStateException("The AI response was incomplete. Please try again.")
-            val message = choice.optJSONObject("message")
-                ?: throw IllegalStateException("The AI provider did not include a message. Please try again.")
-            val rawContent = message.opt("content")
-            val content = when (rawContent) {
-                is String -> rawContent.trim()
-                is JSONArray -> (0 until rawContent.length()).mapNotNull { index ->
-                    rawContent.optJSONObject(index)?.optString("text")?.takeIf { it.isNotBlank() && it != "null" }
-                }.joinToString("\n").trim()
-                else -> ""
+            val content = if (useOpenAi) {
+                val output = root.optJSONArray("output")
+                    ?: throw IllegalStateException("OpenAI returned no output. Check your API access and try again.")
+                (0 until output.length()).mapNotNull { index ->
+                    val item = output.optJSONObject(index) ?: return@mapNotNull null
+                    if (item.optString("type") != "message") return@mapNotNull null
+                    val parts = item.optJSONArray("content") ?: return@mapNotNull null
+                    (0 until parts.length()).mapNotNull { partIndex ->
+                        val part = parts.optJSONObject(partIndex) ?: return@mapNotNull null
+                        if (part.optString("type") == "output_text") part.optString("text").takeIf { it.isNotBlank() } else null
+                    }.joinToString("\n")
+                }.filter { it.isNotBlank() }.joinToString("\n").trim()
+            } else {
+                val choices = root.optJSONArray("choices")
+                    ?: throw IllegalStateException("The free AI provider returned no reply. Please try again.")
+                if (choices.length() == 0) throw IllegalStateException("The free AI provider returned an empty result. Please try again.")
+                val choice = choices.optJSONObject(0)
+                    ?: throw IllegalStateException("The AI response was incomplete. Please try again.")
+                val message = choice.optJSONObject("message")
+                    ?: throw IllegalStateException("The AI provider did not include a message. Please try again.")
+                val rawContent = message.opt("content")
+                when (rawContent) {
+                    is String -> rawContent.trim()
+                    is JSONArray -> (0 until rawContent.length()).mapNotNull { index ->
+                        rawContent.optJSONObject(index)?.optString("text")?.takeIf { it.isNotBlank() && it != "null" }
+                    }.joinToString("\n").trim()
+                    else -> ""
+                }
             }
             if (content.isBlank() || content.equals("null", ignoreCase = true)) {
-                val reason = choice.optString("finish_reason")
-                throw IllegalStateException("The AI provider returned no text" +
-                    (if (reason.isNotBlank() && reason != "null") " (reason: $reason)" else "") +
-                    ". Free models can be busy; please try again in a few seconds.")
+                throw IllegalStateException(if (useOpenAi) "OpenAI returned no text. Check the selected model and API access." else "The free AI provider returned no text. Free models can be busy; please try again.")
             }
             content
         } finally { connection.disconnect() }
@@ -230,6 +250,8 @@ private fun AnimeVerseApp() {
     var favorites by remember { mutableStateOf(prefs.getStringSet("favorite_characters", emptySet())?.toSet() ?: emptySet()) }
     var draft by remember { mutableStateOf("") }
     var apiKey by remember { mutableStateOf("") }
+    var openAiApiKey by remember { mutableStateOf("") }
+    var onlineProvider by remember { mutableStateOf("OpenAI") }
     val localRuntime = remember { LocalAiRuntime(context) }
     var aiMode by remember { mutableStateOf("Auto") }
     var localReady by remember { mutableStateOf(localRuntime.isLoaded()) }
@@ -281,17 +303,20 @@ private fun AnimeVerseApp() {
         persist()
     }
 
+    fun currentOnlineKey(): String = if (onlineProvider == "OpenAI") openAiApiKey else apiKey
+
     fun act(text: String, worldBuild: Boolean = false, livingWorld: Boolean = false) {
         val useLocal = aiMode == "Local" || (aiMode == "Auto" && localRuntime.isLoaded())
         if (aiMode == "Local" && !localRuntime.isLoaded()) { localStatus = "Download and load the local model first."; return }
-        if (!useLocal && apiKey.isBlank()) { keyOpen = true; return }
+        if (!useLocal && currentOnlineKey().isBlank()) { keyOpen = true; return }
         val hero = heroes.firstOrNull { it.name == selected } ?: heroes.first()
         addLine("You", text, true)
         aiBusy = true
         aiScope.launch {
             try {
                 val answer = AnimeVerseAi.reply(
-                    apiKey = apiKey,
+                    apiKey = currentOnlineKey(),
+                    onlineProvider = onlineProvider,
                     world = world + ". Current location: " + currentLocation + ". Player character: " + (playerName.ifBlank { "unnamed player character" }) + ", age " + playerAge + ", background: " + playerBackground + ". The user alone controls this character.",
                     activeCharacter = hero,
                     cast = heroes,
@@ -304,15 +329,15 @@ private fun AnimeVerseApp() {
                 )
                 recordAiAnswer(answer, worldBuild, livingWorld)
             } catch (e: Exception) {
-                if (useLocal && aiMode == "Auto" && apiKey.isNotBlank()) {
+                if (useLocal && aiMode == "Auto" && currentOnlineKey().isNotBlank()) {
                     try {
-                        val fallback = AnimeVerseAi.reply(apiKey = apiKey, world = world + ". Current location: " + currentLocation + ". Player character: " + (playerName.ifBlank { "unnamed player character" }) + ", age " + playerAge + ", background: " + playerBackground + ". The user alone controls this character.", activeCharacter = hero, cast = heroes, history = lines.takeLast(24), matureRomance = mature, storyMemory = storyMemory, worldBuild = worldBuild, livingWorld = livingWorld, localRuntime = null)
+                        val fallback = AnimeVerseAi.reply(apiKey = currentOnlineKey(), onlineProvider = onlineProvider, world = world + ". Current location: " + currentLocation + ". Player character: " + (playerName.ifBlank { "unnamed player character" }) + ", age " + playerAge + ", background: " + playerBackground + ". The user alone controls this character.", activeCharacter = hero, cast = heroes, history = lines.takeLast(24), matureRomance = mature, storyMemory = storyMemory, worldBuild = worldBuild, livingWorld = livingWorld, localRuntime = null)
                         recordAiAnswer(fallback, worldBuild, livingWorld)
                     } catch (fallbackError: Exception) {
                         addLine("System", "Local AI failed (" + (e.message ?: "unknown error") + "); online fallback failed (" + (fallbackError.message ?: "unknown error") + ").", false)
                     }
                 } else {
-                    addLine("System", "AI connection failed: " + (e.message ?: "Please try again.") + " Check your internet and free-model API key.", false)
+                    addLine("System", "AI connection failed: " + (e.message ?: "Please try again.") + " Check your internet and selected provider API key.", false)
                 }
             } finally { aiBusy = false }
         }
@@ -395,8 +420,8 @@ private fun AnimeVerseApp() {
                             val action = worldDraft.trim()
                             if (action.isNotEmpty() && !aiBusy) {
                                 val canSend = (aiMode == "Local" && localRuntime.isLoaded()) ||
-                                    (aiMode == "Online" && apiKey.isNotBlank()) ||
-                                    (aiMode == "Auto" && (localRuntime.isLoaded() || apiKey.isNotBlank()))
+                                    (aiMode == "Online" && currentOnlineKey().isNotBlank()) ||
+                                    (aiMode == "Auto" && (localRuntime.isLoaded() || currentOnlineKey().isNotBlank()))
                                 act(action, livingWorld = true)
                                 if (canSend) worldDraft = ""
                             }
@@ -503,6 +528,13 @@ private fun AnimeVerseApp() {
                 Button(onClick = { createOpen = true }) { Text("+ Hero") }
             }
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf("OpenAI GPT", "OpenRouter").forEach { provider ->
+                    FilterChip(selected = onlineProvider == if (provider == "OpenAI GPT") "OpenAI" else "OpenRouter",
+                        onClick = { onlineProvider = if (provider == "OpenAI GPT") "OpenAI" else "OpenRouter"; keyOpen = false },
+                        label = { Text(provider) })
+                }
+            }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf("Local", "Online", "Auto").forEach { mode -> FilterChip(selected = aiMode == mode, onClick = { aiMode = mode }, label = { Text(mode) }) }
             }
             Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -554,7 +586,7 @@ private fun AnimeVerseApp() {
                     textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 14.sp),
                     decorationBox = { inner -> if (draft.isEmpty()) Text("Write what happens next…", color = Muted); inner() })
                 Spacer(Modifier.width(7.dp))
-                Button(onClick = { val value = draft.trim(); if (value.isNotEmpty() && !aiBusy) { act(value); if (apiKey.isNotBlank()) draft = "" } }, enabled = !aiBusy) { Text("Send") }
+                Button(onClick = { val value = draft.trim(); if (value.isNotEmpty() && !aiBusy) { act(value); if (currentOnlineKey().isNotBlank() || aiMode == "Local") draft = "" } }, enabled = !aiBusy) { Text("Send") }
             }
             Text("Local story save • online AI • free-model availability varies", color = Muted, fontSize = 9.sp, modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 5.dp))
             }
@@ -563,16 +595,24 @@ private fun AnimeVerseApp() {
 
     if (keyOpen) AlertDialog(
         onDismissRequest = { keyOpen = false },
-        title = { Text("Connect free online AI") },
+        title = { Text(if (onlineProvider == "OpenAI") "Connect OpenAI GPT" else "Connect OpenRouter free AI") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Create a free OpenRouter account and an API key. Use free models only; do not add credits or enable paid usage. Free model availability and daily limits can change.", color = Muted)
-                OutlinedTextField(apiKey, { apiKey = it.trim() }, label = { Text("OpenRouter API key") }, singleLine = true)
-                Text("Your key is kept only in app memory for this session and is not saved to the story. Re-enter it after restarting the app.", color = Muted, fontSize = 11.sp)
+                if (onlineProvider == "OpenAI") {
+                    Text("Create an OpenAI API key at platform.openai.com/api-keys. The API is billed separately from a ChatGPT subscription; model access, usage limits and charges depend on your API account.", color = Muted)
+                    OutlinedTextField(openAiApiKey, { openAiApiKey = it.trim() }, label = { Text("OpenAI API key") }, singleLine = true)
+                } else {
+                    Text("Create an OpenRouter account and API key. The app requests free models only; availability and limits can change.", color = Muted)
+                    OutlinedTextField(apiKey, { apiKey = it.trim() }, label = { Text("OpenRouter API key") }, singleLine = true)
+                }
+                Text("For this personal test build, the key stays in app memory for this session and is not saved to the story. Re-enter it after restarting. A production release should use a secure backend; never publish an API key in the app or GitHub.", color = Muted, fontSize = 11.sp)
             }
         },
         confirmButton = { TextButton(onClick = { keyOpen = false }) { Text("Save for this session") } },
-        dismissButton = { TextButton(onClick = { apiKey = ""; keyOpen = false }) { Text("Clear key") } }
+        dismissButton = { TextButton(onClick = {
+            if (onlineProvider == "OpenAI") openAiApiKey = "" else apiKey = ""
+            keyOpen = false
+        }) { Text("Clear key") } }
     )
 
     if (imageKeyOpen) AlertDialog(
