@@ -139,7 +139,9 @@ private fun AnimeVerseApp() {
         persist()
     }
     fun act(text: String, worldBuild: Boolean = false) {
-        if (apiKey.isBlank()) { keyOpen = true; return }
+        val useLocal = aiMode == "Local" || (aiMode == "Auto" && localRuntime.isLoaded())
+        if (aiMode == "Local" && !localRuntime.isLoaded()) { localStatus = "Download and load the local model first."; return }
+        if (!useLocal && apiKey.isBlank()) { keyOpen = true; return }
         val hero = heroes.firstOrNull { it.name == selected } ?: heroes.first()
         addLine("You", text, true)
         aiBusy = true
@@ -153,7 +155,8 @@ private fun AnimeVerseApp() {
                     history = lines.takeLast(24),
                     matureRomance = mature,
                     storyMemory = storyMemory,
-                    worldBuild = worldBuild
+                    worldBuild = worldBuild,
+                    localRuntime = if (useLocal) localRuntime else null
                 )
                 addLine(if (worldBuild) "WORLD ARCHITECT" else hero.name, answer, false)
                 if (worldBuild) storyMemory = (storyMemory + "\\n\\nWORLD BIBLE (AI-GENERATED CANON):\\n" + answer).take(12000)
