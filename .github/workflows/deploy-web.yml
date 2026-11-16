@@ -2,7 +2,8 @@ name: Deploy AnimeVerse AI website
 
 on:
   push:
-    branches:\n      - web-first-free-chatgpt\n    paths:
+    branches:
+      - web-first-free-chatgpt\n    paths:
       - "web/**"
       - ".github/workflows/deploy-web.yml"
   workflow_dispatch:
