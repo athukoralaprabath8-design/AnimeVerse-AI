@@ -221,7 +221,7 @@ private fun AnimeVerseApp() {
         text = { Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Text("Saved on this device", color = Violet, fontWeight = FontWeight.Bold)
             Text("World: " + world + "\nChapter: " + chapter + "\nCast: " + heroes.joinToString { it.name + " (" + it.age + ")" } + "\nBond points: " + bonds + "\nSaved messages: " + lines.size, color = Color.White)
-            Text("The cast and recent story history return when you reopen the app. This build uses scripted replies; live AI is not connected yet.", color = Muted, fontSize = 12.sp)
+            Text("The cast and recent story history return when you reopen the app. Online AI replies require an OpenRouter API key; the key is kept only for this app session.", color = Muted, fontSize = 12.sp)
             TextButton(onClick = { chapter++; addLine("Narrator", "Chapter " + chapter + " begins. Your cast and earlier story remain.", false); memoryOpen = false }) { Text("Begin next chapter") }
             TextButton(onClick = { lines = listOf(Line("Narrator", "A fresh scene begins in " + world + ". Your cast remains: " + heroes.joinToString { it.name }, false)); persist() }) { Text("Clear conversation (keep cast)") }
         } },
