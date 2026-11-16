@@ -189,11 +189,25 @@ private fun AnimeVerseApp() {
                 Spacer(Modifier.width(7.dp))
                 Button(onClick = { val value = draft.trim(); if (value.isNotEmpty() && !aiBusy) { act(value); if (apiKey.isNotBlank()) draft = "" } }, enabled = !aiBusy) { Text("Send") }
             }
-            Text("Local save • no paid API required • prototype replies are scripted", color = Muted, fontSize = 9.sp, modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 5.dp))
+            Text("Local story save • online AI • free-model availability varies", color = Muted, fontSize = 9.sp, modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 5.dp))
         }
     }
 
-    if (keyOpen) AlertDialog(\n        onDismissRequest = { keyOpen = false },\n        title = { Text("Connect free online AI") },\n        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {\n            Text("Create a free OpenRouter account and an API key. Use free models only; do not add credits or enable paid usage. Free model availability and daily limits can change.", color = Muted)\n            OutlinedTextField(apiKey, { apiKey = it.trim() }, label = { Text("OpenRouter API key") }, singleLine = true)\n            Text("Your key is kept only in app memory for this session and is not saved to the story. Re-enter it after restarting the app.", color = Muted, fontSize = 11.sp)\n        } },\n        confirmButton = { TextButton(onClick = { keyOpen = false }) { Text("Save for this session") } },\n        dismissButton = { TextButton(onClick = { apiKey = ""; keyOpen = false }) { Text("Clear key") } }\n    )\n\n    if (createOpen) AlertDialog(
+    if (keyOpen) AlertDialog(
+        onDismissRequest = { keyOpen = false },
+        title = { Text("Connect free online AI") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Create a free OpenRouter account and an API key. Use free models only; do not add credits or enable paid usage. Free model availability and daily limits can change.", color = Muted)
+                OutlinedTextField(apiKey, { apiKey = it.trim() }, label = { Text("OpenRouter API key") }, singleLine = true)
+                Text("Your key is kept only in app memory for this session and is not saved to the story. Re-enter it after restarting the app.", color = Muted, fontSize = 11.sp)
+            }
+        },
+        confirmButton = { TextButton(onClick = { keyOpen = false }) { Text("Save for this session") } },
+        dismissButton = { TextButton(onClick = { apiKey = ""; keyOpen = false }) { Text("Clear key") } }
+    )
+
+    if (createOpen) AlertDialog(
         onDismissRequest = { createOpen = false },
         title = { Text("Add a character to your world") },
         text = { Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
