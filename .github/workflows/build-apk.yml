@@ -3,6 +3,17 @@ on:
   workflow_dispatch:
   push:
     branches: [ "main", "offline-ai-engine-spike", "living-world-freeform" ]
+    paths:
+      - "app/**"
+      - "libs/**"
+      - "gradle/**"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle.properties"
+      - ".github/workflows/build-apk.yml"
+concurrency:
+  group: animeverse-apk-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
