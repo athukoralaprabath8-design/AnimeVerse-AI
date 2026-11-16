@@ -1,6 +1,8 @@
 package com.animeverse.ai
 
 import android.os.Bundle
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -9,6 +11,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -21,6 +24,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -79,6 +84,43 @@ private val starters = listOf(
 
 
 private object AnimeVerseAi {
+    suspend fun generateAnimeImage(apiKey: String, description: String): Bitmap = withContext(Dispatchers.IO) {
+        val prompt = "high quality anime illustration, detailed expressive character design, cinematic lighting, polished anime background art, clearly adult characters, non-explicit, fully clothed, no nudity, " + description
+        val endpoint = URL("https://gen.pollinations.ai/image/" + android.net.Uri.encode(prompt) +
+            "?model=flux&width=1024&height=1024&private=true")
+        val connection = (endpoint.openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 30000
+            readTimeout = 120000
+            setRequestProperty("Authorization", "Bearer " + apiKey)
+            setRequestProperty("Accept", "image/*")
+        }
+        try {
+            val code = connection.responseCode
+            if (code !in 200..299) {
+                val detail = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                throw IllegalStateException("Image service error (" + code + "): " + detail.take(220).ifBlank { "Check your image API key and try again." })
+            }
+            val bytes = connection.inputStream.use { input ->
+                val output = java.io.ByteArrayOutputStream()
+                val buffer = ByteArray(8192)
+                var total = 0
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    total += count
+                    if (total > 20 * 1024 * 1024) throw IllegalStateException("Generated image is too large to load.")
+                    output.write(buffer, 0, count)
+                }
+                output.toByteArray()
+            }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                ?: throw IllegalStateException("The image service returned an unsupported image.")
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     suspend fun reply(
         apiKey: String,
         world: String,
