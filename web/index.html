@@ -73,15 +73,15 @@ async function requestAI(){
  status.textContent="✦ Connecting to the AI…";status.className="ai-status";
  const send=$("chatForm").querySelector("button");send.disabled=true;send.textContent="…";
  const system=buildPrompt().split("\nRECENT STORY:")[0]+"\n\nROLEPLAY QUALITY RULES:\n- Sound like a skilled human roleplayer, not a generic story generator. Be emotionally believable, spontaneous, warm, and specific to what the user just said or did.\n- React directly to the latest user message first. Do not ignore details, repeat the user's action back at length, recap the scene, or restart the story.\n- Treat first-person actions written by the user (I walk, I go, I pick up, I say) as completed actions by the user's player character and as canon in the scene. Accept the user's stated location, movement, dialogue, and choices; do not undo, contradict, skip, or leave the user character behind. Continue from the exact result of their action and describe how the world and other characters respond.\n- Do not control the user's character, but do acknowledge and incorporate every action the user explicitly writes. Never make the user repeat an action they have already stated. If the user says I go to the beach, the next reply must continue with the user at the beach, not still at the previous location.\n- Treat the user's messages as actions and dialogue happening inside the roleplay. If they tell a character to go somewhere, follow them, meet someone, leave, travel, open a door, or do another action, make that happen in the scene. Narrate the character's response and consequences; if travel takes time, move the scene forward rather than getting stuck describing the departure. Do not interpret ordinary roleplay instructions as requests to navigate the website.\n- When the user gives a clear direction for the scene, carry it out instead of merely saying okay, asking what they mean, or waiting for another instruction. Only ask a question when an essential detail is genuinely missing.\n- Keep the pacing natural: sometimes a short line of dialogue is best; sometimes use a few paragraphs. Do not force every reply to be long, poetic, dramatic, or end with a question.\n- Let characters speak in distinct voices, with natural dialogue, small gestures, pauses, humor, awkwardness, affection, tension, and subtext when appropriate. Avoid stiff exposition, clichés, repetitive phrases, and overuse of character names.\n- Stay in the scene. Let events unfold gradually and give the user room to participate. Never decide the user character's actions, dialogue, thoughts, or feelings.\n- Maintain continuity and remember details established earlier in this chat. Do not invent that the user agreed to something. Do not narrate every tiny movement.\n- Match the user's tone and response length. If they send a brief casual message, answer conversationally; if they make a major story move, develop the scene more fully.\n- Romance should develop naturally and only between clearly adult, consenting characters.";
- const history=state.messages.slice(-16).map(m=>({role:m.who==="You"?"user":"assistant",content:m.text}));
+ const history=state.messages.slice(-10).map(m=>({role:m.who==="You"?"user":"assistant",content:m.text}));
  let answer="";
  let lastError=null;
- for(let attempt=1;attempt<=3;attempt++){
+ for(let attempt=1;attempt<=2;attempt++){
   const controller=new AbortController();
-  const timeout=setTimeout(()=>controller.abort(),45000);
+  const timeout=setTimeout(()=>controller.abort(),30000);
   try{
-   status.textContent=attempt===1?"✦ The story is thinking…":("✦ Retrying connection ("+attempt+"/3)…");
-   const response=await fetch("https://openrouter.ai/api/v1/chat/completions",{method:"POST",signal:controller.signal,headers:{"Authorization":"Bearer "+key,"Content-Type":"application/json","HTTP-Referer":"https://athukoralaprabath8-design.github.io/AnimeVerse-AI/","X-Title":"AnimeVerse"},body:JSON.stringify({model,messages:[{role:"system",content:system},...history],temperature:0.9,max_tokens:850})});
+   status.textContent=attempt===1?"✦ The story is thinking…":"✦ Quick retry…";
+   const response=await fetch("https://openrouter.ai/api/v1/chat/completions",{method:"POST",signal:controller.signal,headers:{"Authorization":"Bearer "+key,"Content-Type":"application/json","HTTP-Referer":"https://athukoralaprabath8-design.github.io/AnimeVerse-AI/","X-Title":"AnimeVerse"},body:JSON.stringify({model,messages:[{role:"system",content:system},...history],provider:{sort:"latency"},temperature:0.85,max_tokens:450})});
    const raw=await response.text();
    let data={};try{data=JSON.parse(raw)}catch(_){}
    if(!response.ok){
@@ -94,8 +94,8 @@ async function requestAI(){
   }catch(err){
    lastError=err;
    const retryable=!err.status||err.status===408||err.status===429||err.status>=500;
-   if(!retryable||attempt===3)break;
-   await new Promise(resolve=>setTimeout(resolve,1000*attempt));
+   if(!retryable||attempt===2)break;
+   await new Promise(resolve=>setTimeout(resolve,500));
   }finally{clearTimeout(timeout)}
  }
  try{
