@@ -18,8 +18,11 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-      - name: Install Android NDK
-        run: sdkmanager "ndk;27.2.12479018"
+      - name: Set up Android SDK and NDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "ndk;27.2.12479018"
+          accept-android-sdk-licenses: true
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
