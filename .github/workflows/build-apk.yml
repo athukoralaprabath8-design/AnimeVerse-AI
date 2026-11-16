@@ -18,8 +18,8 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Show Android SDK
+        run: echo "Android SDK: $ANDROID_HOME"
       - name: Install Android NDK
         run: sdkmanager "ndk;27.2.12479018"
       - name: Set up Gradle
