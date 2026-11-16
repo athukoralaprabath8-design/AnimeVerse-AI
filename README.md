@@ -39,3 +39,8 @@ gradle assembleDebug
 ```
 
 APK output: `app/build/outputs/apk/debug/app-debug.apk`.
+
+
+## Online AI chat (in progress)
+
+The Android prototype now includes an OpenRouter-compatible online chat client. To test it, create an API key at https://openrouter.ai/keys and enter it in the app's **AI KEY** dialog. Select free models only; availability and quotas are controlled by the provider. The key is currently held in app memory for the active session and is not persisted. Never commit API keys to this repository.
