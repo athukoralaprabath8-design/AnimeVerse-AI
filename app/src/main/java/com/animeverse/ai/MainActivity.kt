@@ -35,6 +35,27 @@ private val Panel = Color(0xFF211B32)
 private val Muted = Color(0xFFB9B1C9)
 private data class Hero(val name: String, val age: Int, val role: String, val bio: String)
 private data class Line(val speaker: String, val body: String, val mine: Boolean)
+private data class WorldPlace(val name: String, val region: String, val description: String)
+private val worldPlaces = listOf(
+    WorldPlace("Moonlit Academy", "Lunaris City", "A vast academy with dormitories, classrooms, gardens, a library and a busy central courtyard."),
+    WorldPlace("Silverleaf Market", "Lunaris City", "A lively market of food stalls, small shops, street performers and merchants from distant regions."),
+    WorldPlace("Lantern Street", "Lunaris City", "A warm evening district filled with cafes, apartments, music venues and narrow side streets."),
+    WorldPlace("Royal Archive", "Lunaris City", "An old public archive containing maps, records, forgotten letters and carefully guarded secrets."),
+    WorldPlace("Whispering Forest", "Outer Lands", "A deep woodland with trails, streams, ruins, wildlife and occasional travelers."),
+    WorldPlace("Harbor of Glass", "Coastal Reach", "A crowded harbor where fishing boats, merchant ships and travelers arrive throughout the day.")
+)
+private val roamingPeople = listOf(
+    Hero("Emi", 22, "Apprentice Healer", "Patient and observant, she volunteers at the academy clinic and worries about everyone except herself."),
+    Hero("Daichi", 26, "Market Courier", "Quick-witted, restless and well-connected; he knows the city's shortcuts and local gossip."),
+    Hero("Natsumi", 23, "Street Violinist", "Independent and quietly funny, she plays at Lantern Street and dislikes being treated like a celebrity."),
+    Hero("Toma", 28, "Archive Keeper", "A meticulous historian with a dry sense of humour and a fascination with missing records."),
+    Hero("Ayame", 24, "Forest Guide", "Practical, brave and protective of the forest; she trusts actions more than promises."),
+    Hero("Jun", 21, "Harbor Deckhand", "Friendly and adventurous, he dreams of sailing beyond the known coastal routes."),
+    Hero("Kaede", 25, "Flower Shop Owner", "Gentle but outspoken, she remembers customers and notices changes in the neighbourhood."),
+    Hero("Shin", 27, "Traveling Chef", "Sociable, competitive and always searching for unusual ingredients and recipes."),
+    Hero("Mei", 22, "Student Researcher", "Curious and determined, she asks difficult questions and follows clues others ignore."),
+    Hero("Haru", 29, "Retired Adventurer", "Calm and guarded, he gives thoughtful advice but avoids discussing his past.")
+)
 private fun discoverFilterPlaceholder(hero: Hero, favorites: Set<String>) = true
 private val starters = listOf(
     Hero("Aiko", 21, "Star Guardian", "A bright guardian of the Moonlit Academy."),
@@ -105,6 +126,12 @@ private fun AnimeVerseApp() {
     var lines by remember { mutableStateOf(readLines(prefs.getString("lines", null)).ifEmpty { listOf(Line("Narrator", "Moonlight spills across the academy courtyard. Your adventure begins here.", false)) }) }
     var selected by remember { mutableStateOf("Aiko") }
     var showDiscover by remember { mutableStateOf(false) }
+    var showWorld by remember { mutableStateOf(false) }
+    var playerName by remember { mutableStateOf(prefs.getString("player_name", "") ?: "") }
+    var playerAge by remember { mutableStateOf(prefs.getString("player_age", "21") ?: "21") }
+    var playerBackground by remember { mutableStateOf(prefs.getString("player_background", "") ?: "") }
+    var currentLocation by remember { mutableStateOf(prefs.getString("current_location", "Moonlit Academy") ?: "Moonlit Academy") }
+    var discoveredPeople by remember { mutableStateOf(prefs.getStringSet("discovered_people", emptySet())?.toSet() ?: emptySet()) }
     var discoverQuery by remember { mutableStateOf("") }
     var favorites by remember { mutableStateOf(prefs.getStringSet("favorite_characters", emptySet())?.toSet() ?: emptySet()) }
     var draft by remember { mutableStateOf("") }
@@ -136,7 +163,7 @@ private fun AnimeVerseApp() {
     fun persist() {
         prefs.edit().putString("world", world).putString("heroes", writeHeroes(heroes))
             .putString("lines", writeLines(lines.takeLast(250))).putString("story_memory", storyMemory).putInt("chapter", chapter)
-            .putInt("bonds", bonds).putBoolean("mature", mature).putStringSet("favorite_characters", favorites).apply()
+            .putInt("bonds", bonds).putBoolean("mature", mature).putStringSet("favorite_characters", favorites).putString("player_name", playerName).putString("player_age", playerAge).putString("player_background", playerBackground).putString("current_location", currentLocation).putStringSet("discovered_people", discoveredPeople).apply()
     }
     fun addLine(who: String, text: String, mine: Boolean) {
         lines = (lines + Line(who, text, mine)).takeLast(250)
@@ -153,7 +180,7 @@ private fun AnimeVerseApp() {
             try {
                 val answer = AnimeVerseAi.reply(
                     apiKey = apiKey,
-                    world = world,
+                    world = world + ". Current location: " + currentLocation + ". Player character: " + (playerName.ifBlank { "unnamed player character" }) + ", age " + playerAge + ", background: " + playerBackground + ". The user alone controls this character.",
                     activeCharacter = hero,
                     cast = heroes,
                     history = lines.takeLast(24),
@@ -169,7 +196,7 @@ private fun AnimeVerseApp() {
             } catch (e: Exception) {
                 if (useLocal && aiMode == "Auto" && apiKey.isNotBlank()) {
                     try {
-                        val fallback = AnimeVerseAi.reply(apiKey = apiKey, world = world, activeCharacter = hero, cast = heroes, history = lines.takeLast(24), matureRomance = mature, storyMemory = storyMemory, worldBuild = worldBuild, localRuntime = null)
+                        val fallback = AnimeVerseAi.reply(apiKey = apiKey, world = world + ". Current location: " + currentLocation + ". Player character: " + (playerName.ifBlank { "unnamed player character" }) + ", age " + playerAge + ", background: " + playerBackground + ". The user alone controls this character.", activeCharacter = hero, cast = heroes, history = lines.takeLast(24), matureRomance = mature, storyMemory = storyMemory, worldBuild = worldBuild, localRuntime = null)
                         addLine(if (worldBuild) "WORLD ARCHITECT" else hero.name, fallback, false)
                         if (worldBuild) storyMemory = (storyMemory + "\\n\\nWORLD BIBLE (AI-GENERATED CANON):\\n" + fallback).take(12000)
                         bonds += 1
@@ -194,11 +221,64 @@ private fun AnimeVerseApp() {
                 TextButton(onClick = { memoryDraft = storyMemory; memoryOpen = true }) { Text("MEMORY") }
                 TextButton(onClick = { keyOpen = true }) { Text("AI KEY") }
             }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 7.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = !showDiscover, onClick = { showDiscover = false }, label = { Text("MY STORY") })
-                FilterChip(selected = showDiscover, onClick = { showDiscover = true }, label = { Text("DISCOVER CHARACTERS") })
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 7.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                FilterChip(selected = !showWorld && !showDiscover, onClick = { showWorld = false; showDiscover = false }, label = { Text("MY STORY") })
+                FilterChip(selected = showWorld, onClick = { showWorld = true; showDiscover = false }, label = { Text("LIVING WORLD") })
+                FilterChip(selected = showDiscover, onClick = { showDiscover = true; showWorld = false }, label = { Text("CHARACTERS") })
             }
-            if (showDiscover) {
+            if (showWorld) {
+                val place = worldPlaces.firstOrNull { it.name == currentLocation } ?: worldPlaces.first()
+                Column(Modifier.fillMaxSize().padding(horizontal = 14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                    Text("YOUR LIFE IN THE WORLD", color = Color(0xFFC8B7FF), fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("Create your own identity. The world is yours to explore.", color = Muted, fontSize = 12.sp)
+                    OutlinedTextField(playerName, { playerName = it; persist() }, modifier = Modifier.fillMaxWidth(), label = { Text("Your character name") }, singleLine = true)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(playerAge, { playerAge = it.filter(Char::isDigit).take(3); persist() }, modifier = Modifier.weight(0.35f), label = { Text("Age") }, singleLine = true)
+                        OutlinedTextField(playerBackground, { playerBackground = it; persist() }, modifier = Modifier.weight(0.65f), label = { Text("Background / identity") }, singleLine = true)
+                    }
+                    Text("CURRENT LOCATION", color = Violet, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text(place.name + " · " + place.region, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Text(place.description, color = Muted, fontSize = 12.sp, lineHeight = 17.sp)
+                    Text("TRAVEL TO", color = Violet, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items(worldPlaces) { destination ->
+                            AssistChip(onClick = {
+                                currentLocation = destination.name
+                                persist()
+                                addLine("World", "You arrive at " + destination.name + ". " + destination.description, false)
+                            }, label = { Text(destination.name, fontSize = 10.sp) })
+                        }
+                    }
+                    Text("PEOPLE YOU HAVE MET · " + discoveredPeople.size, color = Violet, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                        items(discoveredPeople.toList()) { personName ->
+                            val person = (heroes + roamingPeople).firstOrNull { it.name == personName }
+                            if (person != null) {
+                                Row(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(12.dp)).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(person.name + " · " + person.age, color = Color.White, fontWeight = FontWeight.Bold)
+                                        Text(person.role, color = Violet, fontSize = 11.sp)
+                                    }
+                                    TextButton(onClick = { if (heroes.none { it.name == person.name }) heroes = heroes + person; selected = person.name; showWorld = false; addLine("Narrator", person.name + " is ready to talk with you.", false); persist() }) { Text("TALK") }
+                                }
+                            }
+                        }
+                    }
+                    Button(onClick = {
+                        val candidates = roamingPeople.filter { it.name !in discoveredPeople }
+                        if (candidates.isEmpty()) {
+                            addLine("World", "You have met all currently authored named residents. More inhabitants can be added as the world grows.", false)
+                        } else {
+                            val encounter = candidates.random()
+                            discoveredPeople = discoveredPeople + encounter.name
+                            if (heroes.none { it.name == encounter.name }) heroes = heroes + encounter
+                            selected = encounter.name
+                            persist()
+                            addLine("World", "While exploring " + currentLocation + ", you notice " + encounter.name + " (" + encounter.role + "). " + encounter.bio + " They are here in the world; you can decide whether to approach.", false)
+                        }
+                    }, modifier = Modifier.fillMaxWidth()) { Text("ROAM & DISCOVER SOMEONE") }
+                }
+            } else if (showDiscover) {
                 val library = (starters + listOf(
                     Hero("Yuna", 23, "Wandering Swordmaster", "Calm, observant and quietly competitive. She protects travelers but rarely speaks about her past."),
                     Hero("Kaito", 25, "Skyship Captain", "A charming risk-taker with a strict personal code and a crew he considers family."),
