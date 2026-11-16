@@ -48,7 +48,8 @@ private object AnimeVerseAi {
         activeCharacter: Hero,
         cast: List<Hero>,
         history: List<Line>,
-        matureRomance: Boolean
+        matureRomance: Boolean,
+        storyMemory: String
     ): String = withContext(Dispatchers.IO) {
         val connection = (URL("https://openrouter.ai/api/v1/chat/completions").openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
@@ -62,7 +63,7 @@ private object AnimeVerseAi {
         }
         try {
             val castInfo = cast.joinToString("\\n") { "${it.name}, age ${it.age}, role ${it.role}, personality/backstory: ${it.bio}" }
-            val system = "You are the roleplay engine for AnimeVerse AI. Write immersive, emotionally believable anime roleplay. World: $world. Active character: ${activeCharacter.name}, age ${activeCharacter.age}, role ${activeCharacter.role}, personality: ${activeCharacter.bio}. Full cast (all may participate naturally):\\n$castInfo\\nStay in character, remember established details in the conversation, show nuanced feelings and agency, and let user choices have consequences. Do not control the user's actions or dialogue. Write 1-3 vivid paragraphs and end naturally without forcing a question every time. Mature romance setting: ${if (matureRomance) "enabled only for clearly adult consenting characters" else "disabled; keep romance non-explicit and age-appropriate"}. Never sexualize minors. Treat this as fictional roleplay."
+            val system = "You are the roleplay engine for AnimeVerse AI. Write immersive, emotionally believable anime roleplay. Persistent story memory (treat as established canon unless the user changes it): $storyMemory. World: $world. Active character: ${activeCharacter.name}, age ${activeCharacter.age}, role ${activeCharacter.role}, personality: ${activeCharacter.bio}. Full cast (all may participate naturally):\\n$castInfo\\nStay in character, remember established details in the conversation, show nuanced feelings and agency, and let user choices have consequences. Do not control the user's actions or dialogue. Write 1-3 vivid paragraphs and end naturally without forcing a question every time. Mature romance setting: ${if (matureRomance) "enabled only for clearly adult consenting characters" else "disabled; keep romance non-explicit and age-appropriate"}. Never sexualize minors. Treat this as fictional roleplay."
             val messages = JSONArray().put(JSONObject().put("role", "system").put("content", system))
             history.takeLast(22).forEach { line ->
                 messages.put(JSONObject().put("role", if (line.mine) "user" else "assistant").put("content", if (line.mine) line.body else "${line.speaker}: ${line.body}"))
@@ -102,6 +103,8 @@ private fun AnimeVerseApp() {
     val aiScope = rememberCoroutineScope()
     var createOpen by remember { mutableStateOf(false) }
     var memoryOpen by remember { mutableStateOf(false) }
+    var storyMemory by remember { mutableStateOf(prefs.getString("story_memory", "") ?: "") }
+    var memoryDraft by remember { mutableStateOf("") }
     var ageOpen by remember { mutableStateOf(!prefs.getBoolean("age_confirmed", false)) }
     var mature by remember { mutableStateOf(prefs.getBoolean("mature", false)) }
     var name by remember { mutableStateOf("") }
@@ -113,7 +116,7 @@ private fun AnimeVerseApp() {
 
     fun persist() {
         prefs.edit().putString("world", world).putString("heroes", writeHeroes(heroes))
-            .putString("lines", writeLines(lines.takeLast(250))).putInt("chapter", chapter)
+            .putString("lines", writeLines(lines.takeLast(250))).putString("story_memory", storyMemory).putInt("chapter", chapter)
             .putInt("bonds", bonds).putBoolean("mature", mature).apply()
     }
     fun addLine(who: String, text: String, mine: Boolean) {
@@ -133,7 +136,8 @@ private fun AnimeVerseApp() {
                     activeCharacter = hero,
                     cast = heroes,
                     history = lines.takeLast(24),
-                    matureRomance = mature
+                    matureRomance = mature,
+                    storyMemory = storyMemory
                 )
                 addLine(hero.name, answer, false)
                 bonds += 1
@@ -151,7 +155,7 @@ private fun AnimeVerseApp() {
                     Text("ANIMEVERSE AI", color = Color(0xFFC8B7FF), fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
                     Text("A world that remembers.", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.ExtraBold)
                 }
-                TextButton(onClick = { memoryOpen = true }) { Text("MEMORY") }
+                TextButton(onClick = { memoryDraft = storyMemory; memoryOpen = true }) { Text("MEMORY") }
                 TextButton(onClick = { keyOpen = true }) { Text("AI KEY") }
             }
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -234,12 +238,15 @@ private fun AnimeVerseApp() {
         title = { Text("Persistent world memory") },
         text = { Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Text("Saved on this device", color = Violet, fontWeight = FontWeight.Bold)
-            Text("World: " + world + "\nChapter: " + chapter + "\nCast: " + heroes.joinToString { it.name + " (" + it.age + ")" } + "\nBond points: " + bonds + "\nSaved messages: " + lines.size, color = Color.White)
-            Text("The cast and recent story history return when you reopen the app. Online AI replies require an OpenRouter API key; the key is kept only for this app session.", color = Muted, fontSize = 12.sp)
+            Text("World: " + world + "\\nChapter: " + chapter + "\\nCast: " + heroes.joinToString { it.name + " (" + it.age + ")" } + "\\nBond points: " + bonds + "\\nSaved messages: " + lines.size, color = Color.White)
+            Text("Story notes / important events", color = Color.White, fontWeight = FontWeight.SemiBold)
+            OutlinedTextField(memoryDraft, { memoryDraft = it }, modifier = Modifier.fillMaxWidth(), minLines = 4, maxLines = 7, label = { Text("What should the AI remember?") }, placeholder = { Text("Example: Aiko promised to protect the academy. Ren knows the secret passage. The group trusts Mika...") })
+            Text("These notes are saved locally and included in the AI prompt every time you chat. Edit them whenever the story changes.", color = Muted, fontSize = 12.sp)
             TextButton(onClick = { chapter++; addLine("Narrator", "Chapter " + chapter + " begins. Your cast and earlier story remain.", false); memoryOpen = false }) { Text("Begin next chapter") }
             TextButton(onClick = { lines = listOf(Line("Narrator", "A fresh scene begins in " + world + ". Your cast remains: " + heroes.joinToString { it.name }, false)); persist() }) { Text("Clear conversation (keep cast)") }
         } },
-        confirmButton = { TextButton(onClick = { memoryOpen = false }) { Text("Close") } }
+        confirmButton = { TextButton(onClick = { storyMemory = memoryDraft.trim(); persist(); memoryOpen = false }) { Text("Save memory") } },
+        dismissButton = { TextButton(onClick = { memoryDraft = storyMemory; memoryOpen = false }) { Text("Cancel") } }
     )
 
     if (ageOpen) AlertDialog(
