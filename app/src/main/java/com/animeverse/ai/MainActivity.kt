@@ -529,8 +529,8 @@ private fun AnimeVerseApp() {
             }
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf("OpenAI GPT", "OpenRouter").forEach { provider ->
-                    FilterChip(selected = onlineProvider == if (provider == "OpenAI GPT") "OpenAI" else "OpenRouter",
-                        onClick = { onlineProvider = if (provider == "OpenAI GPT") "OpenAI" else "OpenRouter"; keyOpen = false },
+                    FilterChip(selected = onlineProvider == (if (provider == "OpenAI GPT") "OpenAI" else "OpenRouter"),
+                        onClick = { onlineProvider = (if (provider == "OpenAI GPT") "OpenAI" else "OpenRouter"); keyOpen = false },
                         label = { Text(provider) })
                 }
             }
