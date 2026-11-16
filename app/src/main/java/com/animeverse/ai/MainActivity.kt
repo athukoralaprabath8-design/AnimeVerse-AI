@@ -170,6 +170,13 @@ private fun AnimeVerseApp() {
     var lines by remember { mutableStateOf(readLines(prefs.getString("lines", null)).ifEmpty { listOf(Line("Narrator", "Moonlight spills across the academy courtyard. Your adventure begins here.", false)) }) }
     var selected by remember { mutableStateOf("Aiko") }
     var showDiscover by remember { mutableStateOf(false) }
+    var showImages by remember { mutableStateOf(false) }
+    var imagePrompt by remember { mutableStateOf("") }
+    var imageApiKey by remember { mutableStateOf("") }
+    var imageKeyOpen by remember { mutableStateOf(false) }
+    var imageBusy by remember { mutableStateOf(false) }
+    var generatedImage by remember { mutableStateOf<Bitmap?>(null) }
+    var imageStatus by remember { mutableStateOf("Create original anime-style character art and world scenes.") }
     var showWorld by remember { mutableStateOf(false) }
     var playerName by remember { mutableStateOf(prefs.getString("player_name", "") ?: "") }
     var playerAge by remember { mutableStateOf(prefs.getString("player_age", "21") ?: "21") }
@@ -282,7 +289,8 @@ private fun AnimeVerseApp() {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 7.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 FilterChip(selected = !showWorld && !showDiscover, onClick = { showWorld = false; showDiscover = false }, label = { Text("MY STORY") })
                 FilterChip(selected = showWorld, onClick = { showWorld = true; showDiscover = false }, label = { Text("LIVING WORLD") })
-                FilterChip(selected = showDiscover, onClick = { showDiscover = true; showWorld = false }, label = { Text("CHARACTERS") })
+                FilterChip(selected = showDiscover, onClick = { showDiscover = true; showWorld = false; showImages = false }, label = { Text("CHARACTERS") })
+                FilterChip(selected = showImages, onClick = { showImages = true; showWorld = false; showDiscover = false }, label = { Text("ART") })
             }
             if (showWorld) {
                 val place = worldPlaces.firstOrNull { it.name == currentLocation } ?: WorldPlace(currentLocation, "Discovered location", "A place discovered through your actions in the living world.")
@@ -398,6 +406,54 @@ private fun AnimeVerseApp() {
                         }
                     }
                 }
+            } else if (showImages) {
+                Column(Modifier.fillMaxSize().padding(horizontal = 14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("ANIME ART STUDIO", color = Color(0xFFC8B7FF), fontSize = 19.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("Generate original portraits, outfits, dramatic moments and locations for your story.", color = Muted, fontSize = 12.sp)
+                    OutlinedTextField(
+                        value = imagePrompt,
+                        onValueChange = { imagePrompt = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Describe the image") },
+                        placeholder = { Text("A silver-haired adult mage in a moonlit academy garden...") },
+                        minLines = 3,
+                        maxLines = 5
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        OutlinedButton(onClick = { imagePrompt = "Original adult anime character portrait, elegant fantasy outfit, soft cinematic lighting, detailed eyes" }, modifier = Modifier.weight(1f)) { Text("CHARACTER", fontSize = 10.sp) }
+                        OutlinedButton(onClick = { imagePrompt = "Beautiful anime fantasy city at twilight, glowing lanterns, detailed architecture, cinematic atmosphere" }, modifier = Modifier.weight(1f)) { Text("LOCATION", fontSize = 10.sp) }
+                    }
+                    Button(
+                        onClick = {
+                            if (imageApiKey.isBlank()) imageKeyOpen = true
+                            else if (imagePrompt.isNotBlank() && !imageBusy) {
+                                imageBusy = true
+                                imageStatus = "Creating your anime artwork…"
+                                aiScope.launch {
+                                    try {
+                                        generatedImage = AnimeVerseAi.generateAnimeImage(imageApiKey, imagePrompt.trim())
+                                        imageStatus = "Artwork generated. Change the description to create another image."
+                                    } catch (e: Exception) {
+                                        imageStatus = e.message ?: "Image generation failed. Please try again."
+                                    } finally { imageBusy = false }
+                                }
+                            }
+                        },
+                        enabled = !imageBusy && imagePrompt.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text(if (imageBusy) "GENERATING ART…" else "GENERATE ANIME IMAGE") }
+                    Text(imageStatus, color = Muted, fontSize = 11.sp)
+                    generatedImage?.let { art ->
+                        Image(
+                            bitmap = art.asImageBitmap(),
+                            contentDescription = "Generated AnimeVerse AI artwork",
+                            modifier = Modifier.fillMaxWidth().weight(1f),
+                            contentScale = ContentScale.Fit
+                        )
+                    } ?: Spacer(Modifier.weight(1f))
+                    TextButton(onClick = { imageKeyOpen = true }) { Text(if (imageApiKey.isBlank()) "CONNECT IMAGE GENERATION" else "CHANGE IMAGE API KEY") }
+                    Text("Image generation uses a separate provider key. Usage limits and any provider charges depend on that provider.", color = Muted, fontSize = 9.sp)
+                }
             } else {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(world, { world = it; persist() }, modifier = Modifier.weight(1f), label = { Text("Story world") }, singleLine = true)
@@ -475,6 +531,20 @@ private fun AnimeVerseApp() {
         },
         confirmButton = { TextButton(onClick = { keyOpen = false }) { Text("Save for this session") } },
         dismissButton = { TextButton(onClick = { apiKey = ""; keyOpen = false }) { Text("Clear key") } }
+    )
+
+    if (imageKeyOpen) AlertDialog(
+        onDismissRequest = { imageKeyOpen = false },
+        title = { Text("Connect anime image generation") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("AnimeVerse AI uses Pollinations image generation. Create a secret API key at enter.pollinations.ai, then paste it here. The key stays in app memory for this session and is not saved to your story.", color = Muted)
+                OutlinedTextField(imageApiKey, { imageApiKey = it.trim() }, label = { Text("Pollinations secret API key") }, singleLine = true)
+                Text("Never share your secret key or put it in public GitHub files. Provider limits and prices can change.", color = Muted, fontSize = 11.sp)
+            }
+        },
+        confirmButton = { TextButton(onClick = { imageKeyOpen = false }) { Text("Use this key") } },
+        dismissButton = { TextButton(onClick = { imageApiKey = ""; imageKeyOpen = false }) { Text("Clear key") } }
     )
 
     if (createOpen) AlertDialog(
