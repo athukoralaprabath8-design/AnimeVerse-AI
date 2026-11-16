@@ -538,7 +538,7 @@ private fun AnimeVerseApp() {
         title = { Text("Connect anime image generation") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("AnimeVerse AI uses Pollinations image generation. Create a secret API key at enter.pollinations.ai, then paste it here. The key stays in app memory for this session and is not saved to your story.", color = Muted)
+                Text("AnimeVerse AI uses Pollinations image generation. Create a restricted secret API key at enter.pollinations.ai with image-only access and a small usage budget, then paste it here. The key stays in app memory for this session and is not saved to your story.", color = Muted)
                 OutlinedTextField(imageApiKey, { imageApiKey = it.trim() }, label = { Text("Pollinations secret API key") }, singleLine = true)
                 Text("Never share your secret key or put it in public GitHub files. Provider limits and prices can change.", color = Muted, fontSize = 11.sp)
             }
