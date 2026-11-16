@@ -185,8 +185,8 @@ private fun AnimeVerseApp() {
             if (aiBusy) Text("AI IS THINKING…", color = Violet, fontSize = 10.sp, modifier = Modifier.padding(start = 16.dp))
             Text("QUICK CHOICES", color = Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 16.dp))
             LazyRow(contentPadding = PaddingValues(horizontal = 10.dp), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                items(listOf("Start a quest", "Explore the academy", "Talk about romance", "Meet the whole cast")) { item ->
-                    AssistChip(onClick = { act(item) }, label = { Text(item, fontSize = 10.sp) })
+                items(listOf("Build my world", "Start a quest", "Explore the academy", "Talk about romance", "Meet the whole cast")) { item ->
+                    AssistChip(onClick = { if (item == "Build my world") act("Create a rich, original world bible for our setting. Invent its locations, cultures, factions, history, mysteries, rules, conflicts, and supporting characters. Keep it coherent and leave my character entirely under my control.", true) else act(item) }, label = { Text(item, fontSize = 10.sp) })
                 }
             }
             Row(Modifier.fillMaxWidth().padding(11.dp), verticalAlignment = Alignment.CenterVertically) {
