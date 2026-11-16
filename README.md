@@ -7,7 +7,8 @@ AnimeVerse AI is an original Android anime-world roleplay app prototype. The goa
 - Jetpack Compose Android interface with a dark anime-inspired theme.
 - Three sample characters and support for creating additional character profiles.
 - Editable story-world name and selectable active character.
-- Local persistence for the cast, conversation history (up to 250 messages), chapter count, romance setting, and bond points.
+- Local persistence for the cast, conversation history (up to 250 messages), editable story-memory notes, chapter count, romance setting, and bond points.
+- Editable story-memory notes are included in each online AI prompt so important events and canon details can carry across sessions.
 - Online AI chat through OpenRouter's OpenAI-compatible Chat Completions API, using the `openrouter/free` model router.
 - 18+ self-attestation setting for mature romance themes; romantic/adult scenarios are restricted by the app prompt to clearly adult, consenting characters.
 - GitHub Actions workflow builds and uploads a debug APK.
@@ -32,7 +33,7 @@ The app requests `openrouter/free`, which routes to an available free model. Fre
 
 ## Current limitations
 
-- The app stores recent chat history locally, but it does not yet create a semantic long-term memory summary. The AI receives only a limited recent slice of the conversation on each request.
+- Story memory is user-edited notes, not automatic AI-generated summaries. The AI also receives only a limited recent slice of the conversation on each request.
 - Character relationship points are a simple prototype counter, not yet a full relationship simulation.
 - Added characters are included in the roleplay prompt, but there is not yet a full autonomous multi-character agent system or complex quest/branching-state engine.
 - The API key is held in memory for the current app session and must be entered again after restarting.
@@ -40,7 +41,7 @@ The app requests `openrouter/free`, which routes to an available free model. Fre
 
 ## Product direction
 
-The next development priorities are inspectable/editable long-term story memories, stronger relationship and consequence systems, multi-character scene participation, improved error handling, and original visual-novel artwork. Mature romance must remain limited to clearly adult, consenting characters; no sexual content involving minors or coercion.
+The next development priorities are automatic memory summarization alongside editable long-term story memories, stronger relationship and consequence systems, multi-character scene participation, improved error handling, and original visual-novel artwork. Mature romance must remain limited to clearly adult, consenting characters; no sexual content involving minors or coercion.
 
 ## Build
 
