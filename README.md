@@ -1,46 +1,53 @@
 # AnimeVerse AI
 
-AnimeVerse AI is an original Android anime-world roleplay project. Its goal is a living visual-novel experience: persistent characters, evolving relationships, branching stories, quests, and user-created worlds.
+AnimeVerse AI is an original Android anime-world roleplay app prototype. The goal is a living visual-novel experience with memorable characters, evolving relationships, branching stories, quests, and user-created worlds.
+
+## Current build: v0.1.0
+
+- Jetpack Compose Android interface with a dark anime-inspired theme.
+- Three sample characters and support for creating additional character profiles.
+- Editable story-world name and selectable active character.
+- Local persistence for the cast, conversation history (up to 250 messages), chapter count, romance setting, and bond points.
+- Online AI chat through OpenRouter's OpenAI-compatible Chat Completions API, using the `openrouter/free` model router.
+- 18+ self-attestation setting for mature romance themes; romantic/adult scenarios are restricted by the app prompt to clearly adult, consenting characters.
+- GitHub Actions workflow builds and uploads a debug APK.
+
+## Install the latest debug APK
+
+1. Open [GitHub Actions](https://github.com/athukoralaprabath8-design/AnimeVerse-AI/actions).
+2. Open the latest successful **Build AnimeVerse AI APK** run.
+3. Download the `AnimeVerse-AI-debug` artifact ZIP.
+4. Extract it on Android and install the included APK. Android may ask you to allow installation from your browser or file manager.
+
+A debug APK is for testing, not a signed production release.
+
+## Connect online AI
+
+1. Create an account and API key at [OpenRouter API Keys](https://openrouter.ai/keys).
+2. Open AnimeVerse AI and tap **AI KEY**.
+3. Paste your key into the app and save it for the current session.
+4. Keep the key private. Never send it to anyone or commit it to this repository.
+
+The app requests `openrouter/free`, which routes to an available free model. Free inference has provider/model rate limits and availability can change; it is not unlimited. Do not add credits or enable paid fallback if you want to keep usage free. See [OpenRouter's free models information](https://openrouter.ai/collections/free-models) and [Free Models Router documentation](https://openrouter.ai/docs/guides/routing/routers/free).
+
+## Current limitations
+
+- The app stores recent chat history locally, but it does not yet create a semantic long-term memory summary. The AI receives only a limited recent slice of the conversation on each request.
+- Character relationship points are a simple prototype counter, not yet a full relationship simulation.
+- Added characters are included in the roleplay prompt, but there is not yet a full autonomous multi-character agent system or complex quest/branching-state engine.
+- The API key is held in memory for the current app session and must be entered again after restarting.
+- Live AI requires internet access and a working provider key. The APK can open without an API key, but AI replies will not work until one is entered.
 
 ## Product direction
 
-- **Living worlds:** story locations, quests, factions, and world events should persist between sessions.
-- **Persistent memory:** preserve conversation history and structured facts such as character identities, relationships, promises, important events, and consequences. Users should be able to inspect, edit, and clear saved memories.
-- **User-created cast:** characters added by the user become members of the active story world and can appear in scenes, interact with one another, and affect future events.
-- **Branching narrative:** choices should change relationships, quests, world state, and endings.
-- **Mature themes:** support adult romance and mature dramatic themes behind an 18+ age gate. Romantic/adult scenarios must involve clearly adult, consenting characters. No sexual content involving minors or coercion.
-- **Free-first operation:** no subscriptions, paid unlocks, or required paid API keys. Prefer on-device/open-source models and local storage. Clearly disclose device requirements and any optional external hosting costs; never promise unlimited cloud inference at no cost.
-
-## Current prototype (v0.1.0)
-
-- Jetpack Compose Android app.
-- Three selectable sample character labels and editable story-world field.
-- Local chat interface with placeholder scripted replies.
-- GitHub Actions workflow to build and upload a debug APK.
-
-**Important:** the current APK is only a starter prototype. It does not yet provide live AI generation, durable story memory, a full character/world engine, accounts, or generated scene art/audio. Those are planned capabilities, not implemented features.
-
-## Planned implementation phases
-
-1. **Local-first foundation:** persistent world save, character profiles, conversation history, memory editor/export/delete, and story-state data models.
-2. **Narrative engine:** scene/chapter progression, choice consequences, quests, relationship values, and continuity checks.
-3. **AI runtime:** optional on-device open model integration, with a clear compatibility/device-performance screen. No secret keys embedded in the APK.
-4. **Visual novel layer:** original character portraits, backgrounds, scene transitions, and optional user-controlled audio.
-5. **Safety and privacy:** 18+ gate for mature romance, adult-only romantic character profiles, consent boundaries, and local-first privacy controls.
+The next development priorities are inspectable/editable long-term story memories, stronger relationship and consequence systems, multi-character scene participation, improved error handling, and original visual-novel artwork. Mature romance must remain limited to clearly adult, consenting characters; no sexual content involving minors or coercion.
 
 ## Build
 
-The GitHub Actions workflow runs on pushes to `main` and can also be started manually from **Actions → Build AnimeVerse AI APK → Run workflow**. Download the `AnimeVerse-AI-debug` artifact after the run succeeds.
+The GitHub Actions workflow runs on pushes to `main` and can also be started manually from **Actions → Build AnimeVerse AI APK → Run workflow**. The debug APK is produced at `app/build/outputs/apk/debug/app-debug.apk` before it is uploaded as an artifact.
 
-For a local build, install JDK 17, Android SDK (platform 35), and Gradle 8.9, then run:
+For a local build, use JDK 17, Android SDK platform 35, and the Gradle wrapper included in the repository:
 
 ```bash
-gradle assembleDebug
+./gradlew assembleDebug
 ```
-
-APK output: `app/build/outputs/apk/debug/app-debug.apk`.
-
-
-## Online AI chat (in progress)
-
-The Android prototype now includes an OpenRouter-compatible online chat client. To test it, create an API key at https://openrouter.ai/keys and enter it in the app's **AI KEY** dialog. Select free models only; availability and quotas are controlled by the provider. The key is currently held in app memory for the active session and is not persisted. Never commit API keys to this repository.
