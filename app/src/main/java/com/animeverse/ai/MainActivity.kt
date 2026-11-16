@@ -36,6 +36,20 @@ private val Muted = Color(0xFFB9B1C9)
 private data class Hero(val name: String, val age: Int, val role: String, val bio: String)
 private data class Line(val speaker: String, val body: String, val mine: Boolean)
 private data class WorldPlace(val name: String, val region: String, val description: String)
+private data class WorldReply(val text: String, val location: String?, val people: List<Hero>)
+
+private fun parseWorldReply(raw: String): WorldReply {
+    val locationPattern = Regex("""\[\[WORLD_LOCATION:([^\]\r\n]{1,80})\]\]""")
+    val peoplePattern = Regex("""\[\[WORLD_NPC:([^|\]\r\n]{1,40})\|(\d{1,3})\|([^|\]\r\n]{1,60})\|([^\]\r\n]{1,240})\]\]""")
+    val location = locationPattern.find(raw)?.groupValues?.getOrNull(1)?.trim()?.takeIf { it.isNotBlank() }
+    val people = peoplePattern.findAll(raw).mapNotNull { match ->
+        val age = match.groupValues[2].toIntOrNull() ?: return@mapNotNull null
+        if (age !in 18..120) return@mapNotNull null
+        Hero(match.groupValues[1].trim(), age, match.groupValues[3].trim(), match.groupValues[4].trim())
+    }.filter { it.name.isNotBlank() }.distinctBy { it.name.lowercase() }.toList()
+    val cleaned = raw.replace(locationPattern, "").replace(peoplePattern, "").trim()
+    return WorldReply(cleaned.ifBlank { "The world stirs around you, but no clear response arrived. Try describing your action again." }, location, people)
+}
 private val worldPlaces = listOf(
     WorldPlace("Moonlit Academy", "Lunaris City", "A vast academy with dormitories, classrooms, gardens, a library and a busy central courtyard."),
     WorldPlace("Silverleaf Market", "Lunaris City", "A lively market of food stalls, small shops, street performers and merchants from distant regions."),
@@ -74,6 +88,7 @@ private object AnimeVerseAi {
         matureRomance: Boolean,
         storyMemory: String,
         worldBuild: Boolean,
+        livingWorld: Boolean = false,
         localRuntime: LocalAiRuntime? = null
     ): String = withContext(Dispatchers.IO) {
         val connection = (URL("https://openrouter.ai/api/v1/chat/completions").openConnection() as HttpURLConnection).apply {
@@ -88,7 +103,8 @@ private object AnimeVerseAi {
         }
         try {
             val castInfo = cast.joinToString("\\n") { "${it.name}, age ${it.age}, role ${it.role}, personality/backstory: ${it.bio}" }
-            val system = "You are the roleplay engine and living world architect for AnimeVerse AI. Write immersive, emotionally believable anime roleplay. Persistent story memory (treat as established canon unless the user changes it): $storyMemory. World: $world. Active character: ${activeCharacter.name}, age ${activeCharacter.age}, role ${activeCharacter.role}, personality: ${activeCharacter.bio}. Full cast (all may participate naturally):\\n$castInfo\\nStay in character, remember established details in the conversation, show nuanced feelings and agency, and let user choices have consequences. The user is the only author of their own character and the driver of the story. Never write the user's dialogue, thoughts, feelings, decisions, intentions, movements, reactions, or actions. Never assume the user agreed, followed, smiled, touched someone, entered a place, accepted a quest, or did anything they did not explicitly say. Never narrate what the user says, feels, or decides. Stop whenever the user must choose or act. Respond directly and specifically to the user's latest words and actions; do not replace them with a prewritten plot or force a direction. Characters are independent fictional people with stable, distinct voices, motives, boundaries, tastes, flaws, habits, and personal goals. Make them feel human through natural conversational rhythm, contractions, subtext, humor, hesitation, curiosity, emotional nuance, changing moods, disagreement, vulnerability, and believable consequences. Let them remember shared events and relationship history; relationships change gradually through what actually happens, not automatic point farming. Characters may initiate their own dialogue or reasonable actions, but never take control of the user or skip an important user decision. Do not make everyone instantly agree, admire, love, or obey the user. Do not make every character speak in every reply; let the relevant person respond, using clear names when multiple characters naturally speak. Avoid repetitive exposition, generic narration, scripted menus, and ending every message with a question. When worldBuild mode is active, act as the World Architect: create an original, coherent setting bible with a compelling premise, geography and important locations, cultures, factions, everyday life, history, mysteries, rules of magic or technology, conflicts, and several memorable supporting NPCs with distinct motives. Make details specific and internally consistent, leave room for the user to shape canon, and never dictate the user character. Format the result with clear headings and practical details. The app will save this generated world bible as persistent canon. WorldBuild mode: $worldBuild. Prefer natural in-character dialogue with concise sensory details only when useful. For normal roleplay, write 1-3 vivid paragraphs and end naturally without forcing a question every time. In worldBuild mode, use the requested world-bible headings and enough detail to make the setting usable. Mature romance setting: ${if (matureRomance) "enabled only for clearly adult consenting characters" else "disabled; keep romance non-explicit and age-appropriate"}. Never sexualize minors. Treat this as fictional roleplay."
+            val livingWorldInstructions = if (livingWorld) " ACTIVE MODE: FREE-ROAMING LIVING WORLD. Treat text in parentheses as the player's attempted action and resolve it naturally in the scene. This is an open-ended simulated world, not a menu or a fixed list of places/NPCs. Invent coherent locations, businesses, streets, homes, public venues and inhabitants when the player's action takes them somewhere new. Create believable adult NPCs with distinct names, ages (18+), jobs, personalities, motives and immediate circumstances; let them approach, work, talk to each other and respond naturally. If the player enters a venue, describe the actual atmosphere and who is present; let staff or visitors initiate plausible conversation without forcing intimacy or assuming consent. Remember new people, locations, promises, events and consequences as canon. Do not require the player to select a predefined character or location. At the very end append exactly one hidden state marker [[WORLD_LOCATION:Current location name]]. For every newly introduced recurring named NPC, append a marker [[WORLD_NPC:Name|Age|Role|Short personality and identifying details]]; age must be 18 or older. These markers are for app memory and will be removed before display. Do not include any other machine markers." else ""
+            val system = "You are the roleplay engine and living world architect for AnimeVerse AI. Write immersive, emotionally believable anime roleplay. Persistent story memory (treat as established canon unless the user changes it): $storyMemory. World: $world. Active character: ${activeCharacter.name}, age ${activeCharacter.age}, role ${activeCharacter.role}, personality: ${activeCharacter.bio}. Full cast (all may participate naturally):\\n$castInfo\\nStay in character, remember established details in the conversation, show nuanced feelings and agency, and let user choices have consequences. The user is the only author of their own character and the driver of the story. Never write the user's dialogue, thoughts, feelings, decisions, intentions, movements, reactions, or actions. Never assume the user agreed, followed, smiled, touched someone, entered a place, accepted a quest, or did anything they did not explicitly say. Never narrate what the user says, feels, or decides. Stop whenever the user must choose or act. Respond directly and specifically to the user's latest words and actions; do not replace them with a prewritten plot or force a direction. Characters are independent fictional people with stable, distinct voices, motives, boundaries, tastes, flaws, habits, and personal goals. Make them feel human through natural conversational rhythm, contractions, subtext, humor, hesitation, curiosity, emotional nuance, changing moods, disagreement, vulnerability, and believable consequences. Let them remember shared events and relationship history; relationships change gradually through what actually happens, not automatic point farming. Characters may initiate their own dialogue or reasonable actions, but never take control of the user or skip an important user decision. Do not make everyone instantly agree, admire, love, or obey the user. Do not make every character speak in every reply; let the relevant person respond, using clear names when multiple characters naturally speak. Avoid repetitive exposition, generic narration, scripted menus, and ending every message with a question. When worldBuild mode is active, act as the World Architect: create an original, coherent setting bible with a compelling premise, geography and important locations, cultures, factions, everyday life, history, mysteries, rules of magic or technology, conflicts, and several memorable supporting NPCs with distinct motives. Make details specific and internally consistent, leave room for the user to shape canon, and never dictate the user character. Format the result with clear headings and practical details. The app will save this generated world bible as persistent canon. WorldBuild mode: $worldBuild. Prefer natural in-character dialogue with concise sensory details only when useful. For normal roleplay, write 1-3 vivid paragraphs and end naturally without forcing a question every time. In worldBuild mode, use the requested world-bible headings and enough detail to make the setting usable. Mature romance setting: ${if (matureRomance) "enabled only for clearly adult consenting characters" else "disabled; keep romance non-explicit and age-appropriate"}. Never sexualize minors. Treat this as fictional roleplay. $livingWorldInstructions"
             if (localRuntime != null) {
                 val localMessages = history.takeLast(22).map { line -> ChatMessage(if (line.mine) "user" else "assistant", if (line.mine) line.body else "${line.speaker}: ${line.body}") }
                 return@withContext localRuntime.generate(system, localMessages)
@@ -97,14 +113,42 @@ private object AnimeVerseAi {
             history.takeLast(22).forEach { line ->
                 messages.put(JSONObject().put("role", if (line.mine) "user" else "assistant").put("content", if (line.mine) line.body else "${line.speaker}: ${line.body}"))
             }
-            val payload = JSONObject().put("model", "openrouter/free").put("messages", messages).put("temperature", 0.9).put("max_tokens", 450)
+            val payload = JSONObject().put("model", "openrouter/free").put("messages", messages)
+                .put("provider", JSONObject().put("allow_fallbacks", true))
+                .put("temperature", 0.85).put("max_tokens", 600)
             connection.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
             val code = connection.responseCode
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-            val raw = stream.bufferedReader().use { it.readText() }
-            if (code !in 200..299) throw IllegalStateException("Provider error $code: " + runCatching { JSONObject(raw).optJSONObject("error")?.optString("message") }.getOrNull().orEmpty().take(220))
-            val content = JSONObject(raw).getJSONArray("choices").getJSONObject(0).getJSONObject("message").optString("content").trim()
-            if (content.isBlank()) throw IllegalStateException("The AI returned an empty reply.")
+            val raw = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            val root = runCatching { JSONObject(raw) }.getOrElse {
+                throw IllegalStateException("The AI service sent an unreadable response (HTTP $code). Please try again.")
+            }
+            val providerError = root.optJSONObject("error")?.optString("message").orEmpty()
+            if (code !in 200..299 || providerError.isNotBlank()) {
+                throw IllegalStateException("AI service error ($code): " +
+                    providerError.ifBlank { "No free model is available right now." }.take(220))
+            }
+            val choices = root.optJSONArray("choices")
+                ?: throw IllegalStateException("The free AI provider returned no reply. Please try again.")
+            if (choices.length() == 0) throw IllegalStateException("The free AI provider returned an empty result. Please try again.")
+            val choice = choices.optJSONObject(0)
+                ?: throw IllegalStateException("The AI response was incomplete. Please try again.")
+            val message = choice.optJSONObject("message")
+                ?: throw IllegalStateException("The AI provider did not include a message. Please try again.")
+            val rawContent = message.opt("content")
+            val content = when (rawContent) {
+                is String -> rawContent.trim()
+                is JSONArray -> (0 until rawContent.length()).mapNotNull { index ->
+                    rawContent.optJSONObject(index)?.optString("text")?.takeIf { it.isNotBlank() && it != "null" }
+                }.joinToString("\n").trim()
+                else -> ""
+            }
+            if (content.isBlank() || content.equals("null", ignoreCase = true)) {
+                val reason = choice.optString("finish_reason")
+                throw IllegalStateException("The AI provider returned no text" +
+                    (if (reason.isNotBlank() && reason != "null") " (reason: $reason)" else "") +
+                    ". Free models can be busy; please try again in a few seconds.")
+            }
             content
         } finally { connection.disconnect() }
     }
@@ -131,6 +175,7 @@ private fun AnimeVerseApp() {
     var playerAge by remember { mutableStateOf(prefs.getString("player_age", "21") ?: "21") }
     var playerBackground by remember { mutableStateOf(prefs.getString("player_background", "") ?: "") }
     var currentLocation by remember { mutableStateOf(prefs.getString("current_location", "Moonlit Academy") ?: "Moonlit Academy") }
+    var worldDraft by remember { mutableStateOf("") }
     var discoveredPeople by remember { mutableStateOf(prefs.getStringSet("discovered_people", emptySet())?.toSet() ?: emptySet()) }
     var discoverQuery by remember { mutableStateOf("") }
     var favorites by remember { mutableStateOf(prefs.getStringSet("favorite_characters", emptySet())?.toSet() ?: emptySet()) }
@@ -169,7 +214,25 @@ private fun AnimeVerseApp() {
         lines = (lines + Line(who, text, mine)).takeLast(250)
         persist()
     }
-    fun act(text: String, worldBuild: Boolean = false) {
+    fun recordAiAnswer(answer: String, worldBuild: Boolean, livingWorld: Boolean) {
+        if (livingWorld) {
+            val parsed = parseWorldReply(answer)
+            if (!parsed.location.isNullOrBlank()) currentLocation = parsed.location
+            if (parsed.people.isNotEmpty()) {
+                heroes = (heroes + parsed.people).distinctBy { it.name.lowercase() }
+                discoveredPeople = discoveredPeople + parsed.people.map { it.name }
+            }
+            addLine("LIVING WORLD", parsed.text, false)
+            storyMemory = (storyMemory + "\n\nWORLD EVENT at " + currentLocation + ": " + parsed.text).takeLast(12000)
+        } else {
+            addLine(if (worldBuild) "WORLD ARCHITECT" else (heroes.firstOrNull { it.name == selected }?.name ?: "Narrator"), answer, false)
+            if (worldBuild) storyMemory = (storyMemory + "\n\nWORLD BIBLE (AI-GENERATED CANON):\n" + answer).takeLast(12000)
+        }
+        bonds += 1
+        persist()
+    }
+
+    fun act(text: String, worldBuild: Boolean = false, livingWorld: Boolean = false) {
         val useLocal = aiMode == "Local" || (aiMode == "Auto" && localRuntime.isLoaded())
         if (aiMode == "Local" && !localRuntime.isLoaded()) { localStatus = "Download and load the local model first."; return }
         if (!useLocal && apiKey.isBlank()) { keyOpen = true; return }
@@ -187,20 +250,15 @@ private fun AnimeVerseApp() {
                     matureRomance = mature,
                     storyMemory = storyMemory,
                     worldBuild = worldBuild,
+                    livingWorld = livingWorld,
                     localRuntime = if (useLocal) localRuntime else null
                 )
-                addLine(if (worldBuild) "WORLD ARCHITECT" else hero.name, answer, false)
-                if (worldBuild) storyMemory = (storyMemory + "\\n\\nWORLD BIBLE (AI-GENERATED CANON):\\n" + answer).take(12000)
-                bonds += 1
-                persist()
+                recordAiAnswer(answer, worldBuild, livingWorld)
             } catch (e: Exception) {
                 if (useLocal && aiMode == "Auto" && apiKey.isNotBlank()) {
                     try {
-                        val fallback = AnimeVerseAi.reply(apiKey = apiKey, world = world + ". Current location: " + currentLocation + ". Player character: " + (playerName.ifBlank { "unnamed player character" }) + ", age " + playerAge + ", background: " + playerBackground + ". The user alone controls this character.", activeCharacter = hero, cast = heroes, history = lines.takeLast(24), matureRomance = mature, storyMemory = storyMemory, worldBuild = worldBuild, localRuntime = null)
-                        addLine(if (worldBuild) "WORLD ARCHITECT" else hero.name, fallback, false)
-                        if (worldBuild) storyMemory = (storyMemory + "\\n\\nWORLD BIBLE (AI-GENERATED CANON):\\n" + fallback).take(12000)
-                        bonds += 1
-                        persist()
+                        val fallback = AnimeVerseAi.reply(apiKey = apiKey, world = world + ". Current location: " + currentLocation + ". Player character: " + (playerName.ifBlank { "unnamed player character" }) + ", age " + playerAge + ", background: " + playerBackground + ". The user alone controls this character.", activeCharacter = hero, cast = heroes, history = lines.takeLast(24), matureRomance = mature, storyMemory = storyMemory, worldBuild = worldBuild, livingWorld = livingWorld, localRuntime = null)
+                        recordAiAnswer(fallback, worldBuild, livingWorld)
                     } catch (fallbackError: Exception) {
                         addLine("System", "Local AI failed (" + (e.message ?: "unknown error") + "); online fallback failed (" + (fallbackError.message ?: "unknown error") + ").", false)
                     }
@@ -249,34 +307,44 @@ private fun AnimeVerseApp() {
                             }, label = { Text(destination.name, fontSize = 10.sp) })
                         }
                     }
-                    Text("PEOPLE YOU HAVE MET · " + discoveredPeople.size, color = Violet, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Text("WORLD SCENE & RECENT EVENTS", color = Violet, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp), contentPadding = PaddingValues(bottom = 6.dp)) {
+                        items(lines.takeLast(16)) { line ->
+                            Column(Modifier.fillMaxWidth(), horizontalAlignment = if (line.mine) Alignment.End else Alignment.Start) {
+                                Text(if (line.mine) "YOU" else line.speaker.uppercase(), color = Violet, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                Box(Modifier.fillMaxWidth(0.94f).background(if (line.mine) Color(0xFF49357A) else Panel, RoundedCornerShape(12.dp)).padding(10.dp)) {
+                                    Text(line.body, color = Color.White, fontSize = 13.sp, lineHeight = 18.sp)
+                                }
+                            }
+                        }
+                        item { Text("PEOPLE YOU HAVE MET · " + discoveredPeople.size, color = Violet, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
                         items(discoveredPeople.toList()) { personName ->
-                            val person = (heroes + roamingPeople).firstOrNull { it.name == personName }
+                            val person = heroes.firstOrNull { it.name.equals(personName, true) } ?: roamingPeople.firstOrNull { it.name.equals(personName, true) }
                             if (person != null) {
                                 Row(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(12.dp)).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(1f)) {
                                         Text(person.name + " · " + person.age, color = Color.White, fontWeight = FontWeight.Bold)
                                         Text(person.role, color = Violet, fontSize = 11.sp)
                                     }
-                                    TextButton(onClick = { if (heroes.none { it.name == person.name }) heroes = heroes + person; selected = person.name; showWorld = false; addLine("Narrator", person.name + " is ready to talk with you.", false); persist() }) { Text("TALK") }
+                                    TextButton(onClick = { if (heroes.none { it.name.equals(person.name, true) }) heroes = heroes + person; selected = person.name; showWorld = false; addLine("Narrator", person.name + " is ready to talk with you.", false); persist() }) { Text("TALK") }
                                 }
                             }
                         }
                     }
-                    Button(onClick = {
-                        val candidates = roamingPeople.filter { it.name !in discoveredPeople }
-                        if (candidates.isEmpty()) {
-                            addLine("World", "You have met all currently authored named residents. More inhabitants can be added as the world grows.", false)
-                        } else {
-                            val encounter = candidates.random()
-                            discoveredPeople = discoveredPeople + encounter.name
-                            if (heroes.none { it.name == encounter.name }) heroes = heroes + encounter
-                            selected = encounter.name
-                            persist()
-                            addLine("World", "While exploring " + currentLocation + ", you notice " + encounter.name + " (" + encounter.role + "). " + encounter.bio + " They are here in the world; you can decide whether to approach.", false)
-                        }
-                    }, modifier = Modifier.fillMaxWidth()) { Text("ROAM & DISCOVER SOMEONE") }
+                    OutlinedTextField(
+                        value = worldDraft,
+                        onValueChange = { worldDraft = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Describe what you do in the world") },
+                        placeholder = { Text("Example: (I enter the inn and look for someone to talk to.)") },
+                        minLines = 2,
+                        maxLines = 4
+                    )
+                    Button(
+                        onClick = { val action = worldDraft.trim(); if (action.isNotEmpty() && !aiBusy) { act(action, livingWorld = true); worldDraft = "" } },
+                        enabled = !aiBusy && worldDraft.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text(if (aiBusy) "THE WORLD IS RESPONDING…" else "DO ACTION") }
                 }
             } else if (showDiscover) {
                 val library = (starters + listOf(
