@@ -148,7 +148,19 @@ private fun AnimeVerseApp() {
                 bonds += 1
                 persist()
             } catch (e: Exception) {
-                addLine("System", "AI connection failed: " + (e.message ?: "Please try again.") + " Check your internet and free-model API key.", false)
+                if (useLocal && aiMode == "Auto" && apiKey.isNotBlank()) {
+                    try {
+                        val fallback = AnimeVerseAi.reply(apiKey = apiKey, world = world, activeCharacter = hero, cast = heroes, history = lines.takeLast(24), matureRomance = mature, storyMemory = storyMemory, worldBuild = worldBuild, localRuntime = null)
+                        addLine(if (worldBuild) "WORLD ARCHITECT" else hero.name, fallback, false)
+                        if (worldBuild) storyMemory = (storyMemory + "\\n\\nWORLD BIBLE (AI-GENERATED CANON):\\n" + fallback).take(12000)
+                        bonds += 1
+                        persist()
+                    } catch (fallbackError: Exception) {
+                        addLine("System", "Local AI failed (" + (e.message ?: "unknown error") + "); online fallback failed (" + (fallbackError.message ?: "unknown error") + ").", false)
+                    }
+                } else {
+                    addLine("System", "AI connection failed: " + (e.message ?: "Please try again.") + " Check your internet and free-model API key.", false)
+                }
             } finally { aiBusy = false }
         }
     }
