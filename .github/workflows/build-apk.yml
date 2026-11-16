@@ -2,28 +2,36 @@ name: Build AnimeVerse AI APK
 on:
   workflow_dispatch:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "offline-ai-engine-spike" ]
 permissions:
   contents: read
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out source
+      - name: Check out source and native engine
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Install Android NDK
+        run: sdkmanager "ndk;27.2.12479018"
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "8.9"
+          gradle-version: "9.8.2"
+      - name: Vendor llama.cpp native sources
+        run: bash libs/llama.kt/scripts/bootstrap.sh
       - name: Build debug APK
         run: gradle assembleDebug
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: AnimeVerse-AI-debug
+          name: AnimeVerse-AI-offline-engine-spike
           path: app/build/outputs/apk/debug/app-debug.apk
