@@ -39,8 +39,8 @@ private data class WorldPlace(val name: String, val region: String, val descript
 private data class WorldReply(val text: String, val location: String?, val people: List<Hero>)
 
 private fun parseWorldReply(raw: String): WorldReply {
-    val locationPattern = Regex("""\[\[WORLD_LOCATION:([^\]\r\n]{1,80})\]\]""")
-    val peoplePattern = Regex("""\[\[WORLD_NPC:([^|\]\r\n]{1,40})\|(\d{1,3})\|([^|\]\r\n]{1,60})\|([^\]\r\n]{1,240})\]\]""")
+    val locationPattern = Regex("""\[\[WORLD_LOCATION:(.{1,80}?)\]\]""")
+    val peoplePattern = Regex("""\[\[WORLD_NPC:([^|]{1,40})\|(\d{1,3})\|([^|]{1,60})\|(.{1,240}?)\]\]""")
     val location = locationPattern.find(raw)?.groupValues?.getOrNull(1)?.trim()?.takeIf { it.isNotBlank() }
     val people = peoplePattern.findAll(raw).mapNotNull { match ->
         val age = match.groupValues[2].toIntOrNull() ?: return@mapNotNull null
@@ -285,7 +285,7 @@ private fun AnimeVerseApp() {
                 FilterChip(selected = showDiscover, onClick = { showDiscover = true; showWorld = false }, label = { Text("CHARACTERS") })
             }
             if (showWorld) {
-                val place = worldPlaces.firstOrNull { it.name == currentLocation } ?: worldPlaces.first()
+                val place = worldPlaces.firstOrNull { it.name == currentLocation } ?: WorldPlace(currentLocation, "Discovered location", "A place discovered through your actions in the living world.")
                 Column(Modifier.fillMaxSize().padding(horizontal = 14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                     Text("YOUR LIFE IN THE WORLD", color = Color(0xFFC8B7FF), fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
                     Text("Create your own identity. The world is yours to explore.", color = Muted, fontSize = 12.sp)
@@ -341,7 +341,16 @@ private fun AnimeVerseApp() {
                         maxLines = 4
                     )
                     Button(
-                        onClick = { val action = worldDraft.trim(); if (action.isNotEmpty() && !aiBusy) { act(action, livingWorld = true); worldDraft = "" } },
+                        onClick = {
+                            val action = worldDraft.trim()
+                            if (action.isNotEmpty() && !aiBusy) {
+                                val canSend = (aiMode == "Local" && localRuntime.isLoaded()) ||
+                                    (aiMode == "Online" && apiKey.isNotBlank()) ||
+                                    (aiMode == "Auto" && (localRuntime.isLoaded() || apiKey.isNotBlank()))
+                                act(action, livingWorld = true)
+                                if (canSend) worldDraft = ""
+                            }
+                        },
                         enabled = !aiBusy && worldDraft.isNotBlank(),
                         modifier = Modifier.fillMaxWidth()
                     ) { Text(if (aiBusy) "THE WORLD IS RESPONDING…" else "DO ACTION") }
