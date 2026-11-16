@@ -287,8 +287,8 @@ private fun AnimeVerseApp() {
                 TextButton(onClick = { keyOpen = true }) { Text("AI KEY") }
             }
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 7.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                FilterChip(selected = !showWorld && !showDiscover, onClick = { showWorld = false; showDiscover = false }, label = { Text("MY STORY") })
-                FilterChip(selected = showWorld, onClick = { showWorld = true; showDiscover = false }, label = { Text("LIVING WORLD") })
+                FilterChip(selected = !showWorld && !showDiscover && !showImages, onClick = { showWorld = false; showDiscover = false; showImages = false }, label = { Text("MY STORY") })
+                FilterChip(selected = showWorld, onClick = { showWorld = true; showDiscover = false; showImages = false }, label = { Text("LIVING WORLD") })
                 FilterChip(selected = showDiscover, onClick = { showDiscover = true; showWorld = false; showImages = false }, label = { Text("CHARACTERS") })
                 FilterChip(selected = showImages, onClick = { showImages = true; showWorld = false; showDiscover = false }, label = { Text("ART") })
             }
