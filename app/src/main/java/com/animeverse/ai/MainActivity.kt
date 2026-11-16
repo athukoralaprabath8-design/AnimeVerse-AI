@@ -50,6 +50,10 @@ private fun AnimeVerseApp() {
     var lines by remember { mutableStateOf(readLines(prefs.getString("lines", null)).ifEmpty { listOf(Line("Narrator", "Moonlight spills across the academy courtyard. Your adventure begins here.", false)) }) }
     var selected by remember { mutableStateOf("Aiko") }
     var draft by remember { mutableStateOf("") }
+    var apiKey by remember { mutableStateOf("") }
+    var keyOpen by remember { mutableStateOf(false) }
+    var aiBusy by remember { mutableStateOf(false) }
+    val aiScope = rememberCoroutineScope()
     var createOpen by remember { mutableStateOf(false) }
     var memoryOpen by remember { mutableStateOf(false) }
     var ageOpen by remember { mutableStateOf(!prefs.getBoolean("age_confirmed", false)) }
@@ -71,22 +75,27 @@ private fun AnimeVerseApp() {
         persist()
     }
     fun act(text: String) {
-        addLine("You", text, true)
-        val cast = heroes.joinToString(", ") { it.name }
+        if (apiKey.isBlank()) { keyOpen = true; return }
         val hero = heroes.firstOrNull { it.name == selected } ?: heroes.first()
-        val answer = when {
-            text.contains("quest", true) || text.contains("mission", true) ->
-                "A sealed observatory quest appears on the academy map. The entire cast — " + cast + " — can become involved. What clue should we follow first?"
-            text.contains("romance", true) || text.contains("date", true) ->
-                if (mature && hero.age >= 18) hero.name + " smiles shyly and asks if you'd like to spend a quiet evening together. The scene stays consensual and character-led."
-                else "A warm friendship scene unfolds. Mature romance is available only with the 18+ setting and adult characters."
-            text.contains("meet", true) || text.contains("cast", true) ->
-                "Everyone gathers in the courtyard: " + cast + ". Their different personalities are already changing the mood of the story."
-            else -> hero.name + " considers your words. The rest of the cast (" + cast + ") react as the world of " + world + " shifts around your decision."
+        addLine("You", text, true)
+        aiBusy = true
+        aiScope.launch {
+            try {
+                val answer = AnimeVerseAi.reply(
+                    apiKey = apiKey,
+                    world = world,
+                    activeCharacter = hero,
+                    cast = heroes,
+                    history = lines.takeLast(24),
+                    matureRomance = mature
+                )
+                addLine(hero.name, answer, false)
+                bonds += 1
+                persist()
+            } catch (e: Exception) {
+                addLine("System", "AI connection failed: " + (e.message ?: "Please try again.") + " Check your internet and free-model API key.", false)
+            } finally { aiBusy = false }
         }
-        addLine(hero.name, answer, false)
-        bonds += 1
-        persist()
     }
 
     MaterialTheme(colorScheme = darkColorScheme(primary = Violet, background = Ink, surface = Panel)) {
@@ -97,6 +106,7 @@ private fun AnimeVerseApp() {
                     Text("A world that remembers.", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.ExtraBold)
                 }
                 TextButton(onClick = { memoryOpen = true }) { Text("MEMORY") }
+                TextButton(onClick = { keyOpen = true }) { Text("AI KEY") }
             }
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(world, { world = it; persist() }, modifier = Modifier.weight(1f), label = { Text("Story world") }, singleLine = true)
@@ -119,6 +129,7 @@ private fun AnimeVerseApp() {
                     }
                 }
             }
+            if (aiBusy) Text("AI IS THINKING…", color = Violet, fontSize = 10.sp, modifier = Modifier.padding(start = 16.dp))
             Text("QUICK CHOICES", color = Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 16.dp))
             LazyRow(contentPadding = PaddingValues(horizontal = 10.dp), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 items(listOf("Start a quest", "Explore the academy", "Talk about romance", "Meet the whole cast")) { item ->
@@ -130,13 +141,13 @@ private fun AnimeVerseApp() {
                     textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 14.sp),
                     decorationBox = { inner -> if (draft.isEmpty()) Text("Write what happens next…", color = Muted); inner() })
                 Spacer(Modifier.width(7.dp))
-                Button(onClick = { val value = draft.trim(); if (value.isNotEmpty()) { act(value); draft = "" } }) { Text("Send") }
+                Button(onClick = { val value = draft.trim(); if (value.isNotEmpty() && !aiBusy) { act(value); if (apiKey.isNotBlank()) draft = "" } }, enabled = !aiBusy) { Text("Send") }
             }
             Text("Local save • no paid API required • prototype replies are scripted", color = Muted, fontSize = 9.sp, modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 5.dp))
         }
     }
 
-    if (createOpen) AlertDialog(
+    if (keyOpen) AlertDialog(\n        onDismissRequest = { keyOpen = false },\n        title = { Text("Connect free online AI") },\n        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {\n            Text("Create a free OpenRouter account and an API key. Use free models only; do not add credits or enable paid usage. Free model availability and daily limits can change.", color = Muted)\n            OutlinedTextField(apiKey, { apiKey = it.trim() }, label = { Text("OpenRouter API key") }, singleLine = true)\n            Text("Your key is kept only in app memory for this session and is not saved to the story. Re-enter it after restarting the app.", color = Muted, fontSize = 11.sp)\n        } },\n        confirmButton = { TextButton(onClick = { keyOpen = false }) { Text("Save for this session") } },\n        dismissButton = { TextButton(onClick = { apiKey = ""; keyOpen = false }) { Text("Clear key") } }\n    )\n\n    if (createOpen) AlertDialog(
         onDismissRequest = { createOpen = false },
         title = { Text("Add a character to your world") },
         text = { Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
