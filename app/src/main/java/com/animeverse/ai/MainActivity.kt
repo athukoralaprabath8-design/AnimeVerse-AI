@@ -69,14 +69,42 @@ private object AnimeVerseAi {
             history.takeLast(22).forEach { line ->
                 messages.put(JSONObject().put("role", if (line.mine) "user" else "assistant").put("content", if (line.mine) line.body else "${line.speaker}: ${line.body}"))
             }
-            val payload = JSONObject().put("model", "openrouter/free").put("messages", messages).put("temperature", 0.9).put("max_tokens", 450)
+            val payload = JSONObject().put("model", "openrouter/free").put("messages", messages)
+                .put("provider", JSONObject().put("allow_fallbacks", true))
+                .put("temperature", 0.85).put("max_tokens", 600)
             connection.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
             val code = connection.responseCode
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-            val raw = stream.bufferedReader().use { it.readText() }
-            if (code !in 200..299) throw IllegalStateException("Provider error $code: " + runCatching { JSONObject(raw).optJSONObject("error")?.optString("message") }.getOrNull().orEmpty().take(220))
-            val content = JSONObject(raw).getJSONArray("choices").getJSONObject(0).getJSONObject("message").optString("content").trim()
-            if (content.isBlank()) throw IllegalStateException("The AI returned an empty reply.")
+            val raw = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            val root = runCatching { JSONObject(raw) }.getOrElse {
+                throw IllegalStateException("The AI service sent an unreadable response (HTTP $code). Please tap Send again.")
+            }
+            val providerError = root.optJSONObject("error")?.optString("message").orEmpty()
+            if (code !in 200..299 || providerError.isNotBlank()) {
+                throw IllegalStateException("AI service error ($code): " +
+                    (providerError.ifBlank { "No free model is available right now." }).take(220))
+            }
+            val choices = root.optJSONArray("choices")
+                ?: throw IllegalStateException("The free AI provider returned no reply. Please wait a moment and try again.")
+            if (choices.length() == 0) throw IllegalStateException("The free AI provider returned an empty result. Please try again.")
+            val choice = choices.optJSONObject(0)
+                ?: throw IllegalStateException("The AI response was incomplete. Please tap Send again.")
+            val message = choice.optJSONObject("message")
+                ?: throw IllegalStateException("The AI provider did not include a message. Please try again.")
+            val rawContent = message.opt("content")
+            val content = when (rawContent) {
+                is String -> rawContent.trim()
+                is JSONArray -> (0 until rawContent.length()).mapNotNull { index ->
+                    rawContent.optJSONObject(index)?.optString("text")?.takeIf { it.isNotBlank() }
+                }.joinToString("\\n").trim()
+                else -> ""
+            }
+            if (content.isBlank() || content.equals("null", ignoreCase = true)) {
+                val reason = choice.optString("finish_reason")
+                throw IllegalStateException("The AI provider returned no text" +
+                    (if (reason.isNotBlank() && reason != "null") " (reason: $reason)" else "") +
+                    ". Free models can be busy; please tap Send again in a few seconds.")
+            }
             content
         } finally { connection.disconnect() }
     }
@@ -127,6 +155,7 @@ private fun AnimeVerseApp() {
     fun act(text: String, worldBuild: Boolean = false) {
         if (apiKey.isBlank()) { keyOpen = true; return }
         val hero = heroes.firstOrNull { it.name == selected } ?: heroes.first()
+        val conversationSnapshot = (lines + Line("You", text, true)).takeLast(24)
         addLine("You", text, true)
         aiBusy = true
         aiScope.launch {
@@ -136,7 +165,7 @@ private fun AnimeVerseApp() {
                     world = world,
                     activeCharacter = hero,
                     cast = heroes,
-                    history = lines.takeLast(24),
+                    history = conversationSnapshot,
                     matureRomance = mature,
                     storyMemory = storyMemory,
                     worldBuild = worldBuild
