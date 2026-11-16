@@ -1,6 +1,12 @@
 package com.animeverse.ai
 
 import android.os.Bundle
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.net.HttpURLConnection
+import java.net.URL
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -33,6 +39,46 @@ private val starters = listOf(
     Hero("Ren", 24, "Quiet Mage", "A reserved spellcaster with a hidden past."),
     Hero("Mika", 22, "Rival Hero", "A fearless adventurer who loves a challenge.")
 )
+
+
+private object AnimeVerseAi {
+    suspend fun reply(
+        apiKey: String,
+        world: String,
+        activeCharacter: Hero,
+        cast: List<Hero>,
+        history: List<Line>,
+        matureRomance: Boolean
+    ): String = withContext(Dispatchers.IO) {
+        val connection = (URL("https://openrouter.ai/api/v1/chat/completions").openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 25000
+            readTimeout = 60000
+            doOutput = true
+            setRequestProperty("Authorization", "Bearer $apiKey")
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("HTTP-Referer", "https://github.com/athukoralaprabath8-design/AnimeVerse-AI")
+            setRequestProperty("X-Title", "AnimeVerse AI")
+        }
+        try {
+            val castInfo = cast.joinToString("\\n") { "${it.name}, age ${it.age}, role ${it.role}, personality/backstory: ${it.bio}" }
+            val system = "You are the roleplay engine for AnimeVerse AI. Write immersive, emotionally believable anime roleplay. World: $world. Active character: ${activeCharacter.name}, age ${activeCharacter.age}, role ${activeCharacter.role}, personality: ${activeCharacter.bio}. Full cast (all may participate naturally):\\n$castInfo\\nStay in character, remember established details in the conversation, show nuanced feelings and agency, and let user choices have consequences. Do not control the user's actions or dialogue. Write 1-3 vivid paragraphs and end naturally without forcing a question every time. Mature romance setting: ${if (matureRomance) "enabled only for clearly adult consenting characters" else "disabled; keep romance non-explicit and age-appropriate"}. Never sexualize minors. Treat this as fictional roleplay."
+            val messages = JSONArray().put(JSONObject().put("role", "system").put("content", system))
+            history.takeLast(22).forEach { line ->
+                messages.put(JSONObject().put("role", if (line.mine) "user" else "assistant").put("content", if (line.mine) line.body else "${line.speaker}: ${line.body}"))
+            }
+            val payload = JSONObject().put("model", "openrouter/free").put("messages", messages).put("temperature", 0.9).put("max_tokens", 450)
+            connection.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
+            val code = connection.responseCode
+            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+            val raw = stream.bufferedReader().use { it.readText() }
+            if (code !in 200..299) throw IllegalStateException("Provider error $code: " + runCatching { JSONObject(raw).optJSONObject("error")?.optString("message") }.getOrNull().orEmpty().take(220))
+            val content = JSONObject(raw).getJSONArray("choices").getJSONObject(0).getJSONObject("message").optString("content").trim()
+            if (content.isBlank()) throw IllegalStateException("The AI returned an empty reply.")
+            content
+        } finally { connection.disconnect() }
+    }
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
